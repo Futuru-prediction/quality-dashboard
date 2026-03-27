@@ -7,9 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "node --test src/lib/*.test.js",
+    "test": "node --test src/lib/*.test.js api/*.test.js",
     "preview": "vite preview",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "test:e2e:report": "playwright show-report e2e/report/html"
   },
   "dependencies": {

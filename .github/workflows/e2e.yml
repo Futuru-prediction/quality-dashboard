@@ -25,11 +25,12 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Run E2E tests
+      - name: Run E2E tests (local preview)
         run: npx playwright test
         working-directory: e2e
         env:
           CI: true
+          PLAYWRIGHT_BASE_URL: ""
 
       - name: Upload HTML report
         if: always()

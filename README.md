@@ -66,6 +66,41 @@ Abre [http://localhost:5173](http://localhost:5173), insere os tokens nos inputs
 
 ---
 
+## Testes e qualidade
+
+### Unitários + contratos
+
+```bash
+npm run test
+```
+
+Esse comando executa:
+
+- `src/lib/*.test.js` (parsers, métricas, flakiness e bridge helpers)
+- `api/*.test.js` (contratos do endpoint `POST /api/sentry-whatsapp-webhook`)
+
+### Lint
+
+```bash
+npm run lint
+```
+
+### E2E (Playwright)
+
+```bash
+npm run test:e2e
+```
+
+Por padrão, o Playwright sobe `build + preview` local e testa a própria branch em `http://127.0.0.1:4173`.
+
+Se precisar validar contra um ambiente remoto específico, sobrescreva:
+
+```bash
+PLAYWRIGHT_BASE_URL=https://seu-ambiente.vercel.app npm run test:e2e
+```
+
+---
+
 ## Como gerar os tokens
 
 ### GitHub Personal Access Token
@@ -138,6 +173,15 @@ Secrets obrigatórios da Vercel continuam os mesmos:
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 
+### CI de E2E para PRs
+
+O workflow `.github/workflows/e2e.yml` roda em `push`, `pull_request` e `workflow_dispatch`:
+
+- instala dependências e browser (`chromium`)
+- executa Playwright contra preview local da branch em teste
+- publica artifacts HTML e JSON do report
+- atua como quality gate de PR (falha de teste quebra o check)
+
 Runbook operacional de alertas, ownership e roteamento de notificações (WhatsApp via webhook): [docs/operations/sentry-alerting.md](docs/operations/sentry-alerting.md)
 
 Bridge endpoint implementado para Sentry -> WhatsApp (Z-API):
@@ -151,17 +195,28 @@ Bridge endpoint implementado para Sentry -> WhatsApp (Z-API):
 
 ```
 quality-dashboard/
+├── api/
+│   ├── sentry-whatsapp-webhook.js
+│   └── sentry-whatsapp-webhook.test.js
+├── e2e/
+│   ├── playwright.config.ts
+│   └── tests/
+├── docs/
+│   ├── operations/
+│   └── qa/
 ├── src/
-│   ├── App.jsx          # Dashboard principal (componente raiz)
-│   ├── api/
-│   │   ├── github.js    # Adapter GitHub REST API v3
-│   │   └── linear.js    # Adapter Linear GraphQL API
-│   ├── components/      # Componentes reutilizáveis
-│   └── hooks/           # Custom hooks
-├── .env.example         # Template de variáveis de ambiente
-├── .gitignore
+│   ├── App.jsx
+│   ├── components/
+│   ├── lib/
+│   └── sentry.js
+├── .github/workflows/
+│   ├── deploy.yml
+│   └── e2e.yml
+├── .env.example
 ├── index.html
 ├── package.json
+├── README.md
+├── vercel.json
 └── vite.config.js
 ```
 
@@ -198,11 +253,15 @@ O org (`Futuru-prediction`) é configurado na constante `ORG` logo abaixo.
 | Fase | Entrega | Status |
 |---|---|---|
 | 1 — MVP | Dashboard com GitHub + Linear | ✅ Done |
-| 2 — Deploy | URL pública no Vercel | 🔄 Em andamento |
-| 3 — Playwright | Cobertura de código + reports | 📋 Backlog |
-| 4 — k6 Trends | Métricas de performance | 📋 Backlog |
+| 2 — Deploy + Observabilidade | URL pública + Sentry + bridge WhatsApp | ✅ Done |
+| 3 — Qualidade de CI | E2E por PR (preview local) + contratos do webhook | 🔄 Em andamento |
+| 4 — Higiene de docs | README/runbooks sincronizados | 🔄 Em andamento |
 
-Issues detalhadas: [linear.app/ebinex](https://linear.app/ebinex) → projeto FUTURU → épicos FTU-211 a FTU-214.
+Issues do ciclo atual:
+
+- `FTU-384` — CI E2E por PR com quality gate
+- `FTU-385` — cobertura de contratos do webhook
+- `FTU-386` — sincronização de README e runbooks
 
 ---
 
