@@ -75,7 +75,8 @@ jobs:
 
       - name: Upload Sentry Source Maps
         run: |
-          sentry-cli releases files "$SENTRY_RELEASE" upload-sourcemaps .vercel/output/static/assets \
+          sentry-cli sourcemaps upload dist/assets \
+            --release "$SENTRY_RELEASE" \
             --url-prefix "~/assets" \
             --rewrite \
             --validate
