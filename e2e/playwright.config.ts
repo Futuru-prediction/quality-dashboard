@@ -12,7 +12,7 @@ export default defineConfig({
     ["list"],
   ],
   use: {
-    baseURL: "https://quality-dashboard-three.vercel.app",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || "https://quality-dashboard-three.vercel.app",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
