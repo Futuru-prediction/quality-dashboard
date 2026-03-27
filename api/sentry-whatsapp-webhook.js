@@ -9,6 +9,13 @@
  * - WHATSAPP_ALERT_DESTINATIONS (comma-separated numbers/group IDs)
  */
 
+import {
+  buildAlertMessage,
+  extractAlertMetadata,
+  parseIncomingPayload,
+  splitDestinations,
+} from "../src/lib/sentryWhatsappBridge.js";
+
 const ZAPI_BASE_URL = "https://api.z-api.io";
 
 function createRequestId(req) {
@@ -20,94 +27,6 @@ function createRequestId(req) {
 function logBridgeEvent(level, payload) {
   const logger = level === "error" ? console.error : console.log;
   logger(JSON.stringify({ scope: "sentry-whatsapp-bridge", ...payload }));
-}
-
-function splitDestinations(raw) {
-  return String(raw || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function resolve(obj, paths, fallback = "") {
-  for (const path of paths) {
-    const value = path.reduce(
-      (acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined),
-      obj,
-    );
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
-  return fallback;
-}
-
-function parsePayloadBody(body) {
-  if (!body) return {};
-  if (typeof body === "string") {
-    try {
-      return JSON.parse(body);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof body === "object") return body;
-  return {};
-}
-
-function buildAlertMessage(payload) {
-  const action = resolve(payload, [["action"]], "triggered");
-  const rule = resolve(payload, [
-    ["data", "triggered_rule"],
-    ["triggered_rule"],
-    ["data", "rule", "name"],
-    ["rule", "name"],
-  ], "unknown-rule");
-  const project = resolve(payload, [
-    ["project", "slug"],
-    ["project", "name"],
-    ["data", "event", "project"],
-  ], "unknown-project");
-  const title = resolve(payload, [
-    ["data", "event", "title"],
-    ["data", "event", "metadata", "title"],
-    ["event", "title"],
-    ["title"],
-  ], "Sentry alert");
-  const level = resolve(payload, [
-    ["data", "event", "level"],
-    ["event", "level"],
-    ["level"],
-  ], "error");
-  const environment = resolve(payload, [
-    ["data", "event", "environment"],
-    ["event", "environment"],
-    ["environment"],
-  ], "unknown");
-  const release = resolve(payload, [
-    ["data", "event", "release"],
-    ["event", "release"],
-    ["release"],
-  ], "unknown");
-  const issueUrl = resolve(payload, [
-    ["data", "event", "web_url"],
-    ["data", "event", "url"],
-    ["event", "web_url"],
-    ["url"],
-  ], "");
-
-  const lines = [
-    "Sentry Alert",
-    `Action: ${action}`,
-    `Rule: ${rule}`,
-    `Project: ${project}`,
-    `Level: ${level}`,
-    `Environment: ${environment}`,
-    `Release: ${release}`,
-    `Title: ${title}`,
-  ];
-
-  if (issueUrl) lines.push(`Link: ${issueUrl}`);
-
-  return lines.join("\n");
 }
 
 async function sendZApiTextMessage({ instanceId, instanceToken, clientToken, phone, message }) {
@@ -225,23 +144,9 @@ export default async function handler(req, res) {
     });
   }
 
-  const payload = parsePayloadBody(req.body);
-  const rule = resolve(payload, [
-    ["data", "triggered_rule"],
-    ["triggered_rule"],
-    ["data", "rule", "name"],
-    ["rule", "name"],
-  ], "unknown-rule");
-  const environment = resolve(payload, [
-    ["data", "event", "environment"],
-    ["event", "environment"],
-    ["environment"],
-  ], "unknown");
-  const release = resolve(payload, [
-    ["data", "event", "release"],
-    ["event", "release"],
-    ["release"],
-  ], "unknown");
+  const payload = parseIncomingPayload(req.body);
+  const metadata = extractAlertMetadata(payload);
+  const { rule, environment, release } = metadata;
 
   logBridgeEvent("info", {
     event: "request_accepted",
@@ -288,9 +193,7 @@ export default async function handler(req, res) {
     sentCount: results.filter((result) => result.ok).length,
     totalCount: results.length,
     statusCode,
-    rule,
-    environment,
-    release,
+    ...metadata,
   });
 
   return res.status(statusCode).json({
@@ -300,9 +203,7 @@ export default async function handler(req, res) {
     totalCount: results.length,
     results,
     meta: {
-      rule,
-      environment,
-      release,
+      ...metadata,
       sentryResource,
       sentryTimestamp,
     },
