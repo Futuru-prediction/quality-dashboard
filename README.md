@@ -14,6 +14,7 @@ Painel centralizado de saúde de qualidade dos repositórios do ecossistema Futu
 | Pipeline Status | GitHub Actions | Status por repo, taxa de sucesso, runs recentes |
 | Último Deploy / Commits | GitHub | Último commit por repo, autor, data |
 | Test Runs | GitHub Actions | Execuções com status, duração, branch |
+| Performance K6 | GitHub Actions (`futuru-k6`) | Tendência p95/p99/error/rps + diagnóstico acionável quando faltar histórico |
 | Bugs | Linear (label: Bug) | Prioridade, assignee, estado, link |
 | Features Testadas | Linear (label: Feature/Feat) | Labels, estado, link |
 | Em Progresso | Linear (state: started) | Cards com prioridade e responsável |
@@ -23,6 +24,15 @@ Painel centralizado de saúde de qualidade dos repositórios do ecossistema Futu
 - `Futuru-prediction/futuru-k6`
 - `Futuru-prediction/futuru-core`
 - `Futuru-prediction/futuru-bff`
+
+## Escopo de dados no UI
+
+- `Escopo de Issues`:
+  - `Quality Dashboard` (default): mostra somente issues com label contendo `Quality Dashboard`
+  - `FTU Global`: mostra toda a fila FTU retornada pela query
+- Métricas de runs no topo:
+  - `Runs passou/falhou`: escopo global (todos os repos monitorados)
+  - `Taxa de sucesso`: escopo do `repo ativo` no painel de pipelines
 
 ---
 
@@ -76,6 +86,7 @@ npm run dev
 ```
 
 Abre [http://localhost:5173](http://localhost:5173), insere os tokens nos inputs e clica **Conectar**.
+Se `VITE_GITHUB_TOKEN` e `VITE_LINEAR_TOKEN` estiverem no `.env`, os campos já iniciam preenchidos por decisão operacional do time.
 
 ---
 
@@ -111,6 +122,16 @@ Se precisar validar contra um ambiente remoto específico, sobrescreva:
 ```bash
 PLAYWRIGHT_BASE_URL=https://seu-ambiente.vercel.app npm run test:e2e
 ```
+
+Para previews protegidos por Vercel Auth, use o runbook:
+
+- [docs/operations/vercel-preview-protected-qa.md](/Users/hugogoncalves/PRJ/Ebinex/quality-dashboard/docs/operations/vercel-preview-protected-qa.md)
+
+### QA visual (mobile + tablet + desktop)
+
+Runbook objetivo com checklist e critérios de merge/release:
+
+- [docs/qa/visual-qa-checklist.md](/Users/hugogoncalves/PRJ/Ebinex/quality-dashboard/docs/qa/visual-qa-checklist.md)
 
 ---
 
@@ -260,6 +281,7 @@ O org (`Futuru-prediction`) é configurado na constante `ORG` logo abaixo.
 - Tokens armazenados **apenas em memória** (`useState`) — nunca em `localStorage`, `sessionStorage` ou cookies
 - Nenhum token trafega para servidor próprio — chamadas diretas do browser para GitHub e Linear
 - Para deploy com URL pública: tokens ficam em variáveis de ambiente do Vercel (nunca no código fonte)
+- Prefill de tokens no formulário inicial é **intencional** para operação interna controlada; o botão `desconectar` limpa sessão e campos da UI.
 
 ---
 
