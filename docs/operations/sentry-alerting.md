@@ -112,6 +112,31 @@ Every WhatsApp alert should include:
 - Direct link to the release health view
 - Primary owner or owner tag
 
+### Troubleshooting (bridge + provider)
+
+If an alert does not reach WhatsApp, diagnose in this order:
+
+1. Confirm Sentry actually fired the rule/event.
+2. Confirm bridge endpoint was called (`POST /api/sentry-whatsapp-webhook`).
+3. Confirm bridge response status and `requestId`.
+4. Confirm provider response for each destination.
+
+Bridge status quick map:
+
+- `401 unauthorized`: secret mismatch (`SENTRY_TO_WHATSAPP_SECRET` vs request).
+- `400 invalid_sentry_resource`: header `sentry-hook-resource` is not `event.alert`.
+- `500 missing_env`: missing `SENTRY_TO_WHATSAPP_SECRET` or `ZAPI_*`/destinations.
+- `502`: bridge called provider but at least one destination failed in Z-API.
+- `200`: bridge accepted and provider returned success for all destinations.
+
+Operational logs emitted by bridge:
+
+- `request_accepted`
+- `provider_send_result`
+- `request_completed`
+
+Each log includes `requestId`, plus rule/environment/release when available, so incidents can be traced end to end.
+
 ## Anti-noise calibration checklist
 
 Use this checklist before turning on paging:

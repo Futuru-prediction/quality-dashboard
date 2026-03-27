@@ -12,6 +12,7 @@ Objective: close `FTU-247` using WhatsApp as the notification channel for Sentry
 References:
 
 - Sentry service hooks (webhook option): https://docs.sentry.io/api/projects/register-a-new-service-hook/
+- Canary execution playbook: `docs/operations/sentry-whatsapp-canary.md`
 
 ## Prerequisites
 

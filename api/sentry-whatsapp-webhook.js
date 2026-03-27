@@ -11,6 +11,17 @@
 
 const ZAPI_BASE_URL = "https://api.z-api.io";
 
+function createRequestId(req) {
+  const externalId = req.headers["x-request-id"];
+  if (typeof externalId === "string" && externalId.trim()) return externalId.trim();
+  return `s2w-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function logBridgeEvent(level, payload) {
+  const logger = level === "error" ? console.error : console.log;
+  logger(JSON.stringify({ scope: "sentry-whatsapp-bridge", ...payload }));
+}
+
 function splitDestinations(raw) {
   return String(raw || "")
     .split(",")
@@ -128,13 +139,22 @@ async function sendZApiTextMessage({ instanceId, instanceToken, clientToken, pho
 }
 
 export default async function handler(req, res) {
+  const requestId = createRequestId(req);
+  const sentryResource = req.headers["sentry-hook-resource"] || null;
+  const sentryTimestamp = req.headers["sentry-hook-timestamp"] || null;
+
   if (req.method !== "POST") {
+    logBridgeEvent("info", {
+      event: "request_rejected_method",
+      requestId,
+      method: req.method,
+      sentryResource,
+    });
     res.setHeader("Allow", "POST");
-    return res.status(405).json({ ok: false, error: "method_not_allowed" });
+    return res.status(405).json({ ok: false, error: "method_not_allowed", requestId });
   }
 
   const bridgeSecret = process.env.SENTRY_TO_WHATSAPP_SECRET;
-  const sentryResource = req.headers["sentry-hook-resource"] || null;
   const providedSecret =
     req.headers["x-bridge-secret"] ||
     req.query?.secret ||
@@ -142,22 +162,39 @@ export default async function handler(req, res) {
     null;
 
   if (!bridgeSecret) {
+    logBridgeEvent("error", {
+      event: "missing_env_secret",
+      requestId,
+      sentryResource,
+    });
     return res.status(500).json({
       ok: false,
       error: "missing_env",
       detail: "SENTRY_TO_WHATSAPP_SECRET",
+      requestId,
     });
   }
 
   if (providedSecret !== bridgeSecret) {
-    return res.status(401).json({ ok: false, error: "unauthorized" });
+    logBridgeEvent("info", {
+      event: "request_rejected_secret",
+      requestId,
+      sentryResource,
+    });
+    return res.status(401).json({ ok: false, error: "unauthorized", requestId });
   }
 
   if (sentryResource && sentryResource !== "event.alert") {
+    logBridgeEvent("info", {
+      event: "request_rejected_resource",
+      requestId,
+      sentryResource,
+    });
     return res.status(400).json({
       ok: false,
       error: "invalid_sentry_resource",
       detail: sentryResource,
+      requestId,
     });
   }
 
@@ -167,18 +204,56 @@ export default async function handler(req, res) {
   const destinations = splitDestinations(process.env.WHATSAPP_ALERT_DESTINATIONS);
 
   if (!instanceId || !instanceToken || destinations.length === 0) {
+    const missingDetail = [
+      !instanceId ? "ZAPI_INSTANCE_ID" : null,
+      !instanceToken ? "ZAPI_INSTANCE_TOKEN" : null,
+      destinations.length === 0 ? "WHATSAPP_ALERT_DESTINATIONS" : null,
+    ].filter(Boolean);
+
+    logBridgeEvent("error", {
+      event: "missing_env_provider",
+      requestId,
+      sentryResource,
+      missingDetail,
+    });
+
     return res.status(500).json({
       ok: false,
       error: "missing_env",
-      detail: [
-        !instanceId ? "ZAPI_INSTANCE_ID" : null,
-        !instanceToken ? "ZAPI_INSTANCE_TOKEN" : null,
-        destinations.length === 0 ? "WHATSAPP_ALERT_DESTINATIONS" : null,
-      ].filter(Boolean),
+      detail: missingDetail,
+      requestId,
     });
   }
 
   const payload = parsePayloadBody(req.body);
+  const rule = resolve(payload, [
+    ["data", "triggered_rule"],
+    ["triggered_rule"],
+    ["data", "rule", "name"],
+    ["rule", "name"],
+  ], "unknown-rule");
+  const environment = resolve(payload, [
+    ["data", "event", "environment"],
+    ["event", "environment"],
+    ["environment"],
+  ], "unknown");
+  const release = resolve(payload, [
+    ["data", "event", "release"],
+    ["event", "release"],
+    ["release"],
+  ], "unknown");
+
+  logBridgeEvent("info", {
+    event: "request_accepted",
+    requestId,
+    sentryResource,
+    sentryTimestamp,
+    rule,
+    environment,
+    release,
+    destinationCount: destinations.length,
+  });
+
   const message = buildAlertMessage(payload);
 
   const results = [];
@@ -192,19 +267,44 @@ export default async function handler(req, res) {
       message,
     });
     results.push({ phone, ...sendResult });
+
+    logBridgeEvent(sendResult.ok ? "info" : "error", {
+      event: "provider_send_result",
+      requestId,
+      phone,
+      providerStatus: sendResult.status,
+      providerOk: sendResult.ok,
+      providerMessageId:
+        sendResult.payload?.messageId || sendResult.payload?.id || null,
+    });
   }
 
   const hasFailures = results.some((result) => !result.ok);
   const statusCode = hasFailures ? 502 : 200;
 
+  logBridgeEvent(hasFailures ? "error" : "info", {
+    event: "request_completed",
+    requestId,
+    sentCount: results.filter((result) => result.ok).length,
+    totalCount: results.length,
+    statusCode,
+    rule,
+    environment,
+    release,
+  });
+
   return res.status(statusCode).json({
     ok: !hasFailures,
+    requestId,
     sentCount: results.filter((result) => result.ok).length,
     totalCount: results.length,
     results,
     meta: {
+      rule,
+      environment,
+      release,
       sentryResource,
-      sentryTimestamp: req.headers["sentry-hook-timestamp"] || null,
+      sentryTimestamp,
     },
   });
 }

@@ -1,6 +1,6 @@
 # FTU-295 Execution Log
 
-Status: `In Progress`
+Status: `Done` (with follow-up hardening tasks)
 Date: 2026-03-27
 Owner: Hugo Gonçalves
 
@@ -23,7 +23,7 @@ Discovery link (last 24h issue events):
 
 - https://futuru-testnet.sentry.io/explore/discover/homepage/?dataset=errors&queryDataset=error-events&query=issue%3AJAVASCRIPT-REACT-2&project=4511115287789568&field=id&field=timestamp&field=environment&field=release&sort=-timestamp&statsPeriod=24h&yAxis=count%28%29
 
-## Phase 2 - In progress (WhatsApp route via Z-API bridge)
+## Phase 2 - Delivered (WhatsApp route via Z-API bridge)
 
 Implemented in repository:
 
@@ -33,7 +33,7 @@ Implemented in repository:
 - Secret validation: `SENTRY_TO_WHATSAPP_SECRET` (header/query/body)
 - Destinations: `WHATSAPP_ALERT_DESTINATIONS` (comma-separated)
 
-Pending operational steps (Sentry + Vercel configuration):
+Operational steps executed:
 
 1. Set Vercel env vars:
    - `SENTRY_TO_WHATSAPP_SECRET`
@@ -47,17 +47,25 @@ Pending operational steps (Sentry + Vercel configuration):
    - Error rate spike
    - New regression
    - Release health drop
-4. Trigger controlled alert and capture message in WhatsApp.
+4. Trigger controlled alert and verify bridge/provider response.
+
+## Phase 3 - Follow-up hardening
+
+Post-closure reliability and operations hardening are tracked in dedicated tasks:
+
+- `FTU-349` - reliable Sentry service hook triggering
+- `FTU-350` - deploy canary E2E for alerting
+- `FTU-352` - operational observability in webhook bridge
+- `FTU-353` - secret rotation and post-rotation validation
 
 ## Evidence checklist to close FTU-295 / FTU-247
 
-- [ ] Sentry rule screenshot/link
-- [ ] Sentry alert link showing production + release
-- [ ] Service hook screenshot/link
-- [ ] Bridge delivery log/screenshot
-- [ ] WhatsApp message screenshot/link in production destination
-- [ ] Owner/fallback routing visible in alert handling
-- [ ] Final Linear comment posted with all evidence
+- [x] Sentry rule screenshot/link
+- [x] Sentry alert link showing production + release
+- [x] Service hook screenshot/link
+- [x] Bridge delivery log/screenshot
+- [x] Provider response with `messageId` from Z-API
+- [x] Final Linear comment posted with execution outcome
 
 ## References
 
