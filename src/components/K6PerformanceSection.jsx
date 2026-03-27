@@ -16,8 +16,8 @@ const COLORS = {
   danger: "#e05252",
   info: "#4a9eff",
   text: "#e8eaed",
-  textMuted: "#6b7280",
-  textDim: "#3d4451",
+  textMuted: "#8a93a3",
+  textDim: "#647083",
   success: "#22c55e",
 };
 
@@ -72,6 +72,77 @@ function EmptyState({ message }) {
       lineHeight: 1.6,
     }}>
       {message}
+    </div>
+  );
+}
+
+function K6InsufficientHistory({ performance }) {
+  const diagnostics = performance?.diagnostics || {};
+  const validRuns = Number(diagnostics.validRuns) || 0;
+  const missingRuns = Number(diagnostics.missingRuns) || Math.max(0, 2 - validRuns);
+  const latestRunUrl = diagnostics.latestRunUrl || performance?.latestRun?.runUrl || null;
+  const latestRunLabel = diagnostics.latestRunLabel || "run mais recente";
+  const primaryReasonLabel = diagnostics.primaryReasonLabel || "causa não identificada";
+  const checklist = Array.isArray(diagnostics.checklist) ? diagnostics.checklist : [];
+  const reasonCounts = diagnostics.reasonCounts && typeof diagnostics.reasonCounts === "object"
+    ? diagnostics.reasonCounts
+    : {};
+
+  return (
+    <div style={{
+      border: `0.5px dashed ${COLORS.borderHover}`,
+      borderRadius: 10,
+      padding: "16px 14px",
+      background: COLORS.bg,
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+    }}>
+      <EmptyState message="Histórico insuficiente de k6. O dashboard precisa de pelo menos 2 runs com summary JSON para mostrar tendência." />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8 }}>
+        <Tag color={COLORS.warn}>{validRuns} run(s) válido(s)</Tag>
+        <Tag color={COLORS.info}>faltam {missingRuns} para tendência</Tag>
+        <Tag color={COLORS.danger}>causa provável: {primaryReasonLabel}</Tag>
+      </div>
+      {Object.keys(reasonCounts).length > 0 && (
+        <div style={{ fontSize: 12, color: COLORS.textMuted, lineHeight: 1.5 }}>
+          Diagnóstico da ingestão:
+          {" "}
+          {Object.entries(reasonCounts)
+            .map(([reason, count]) => `${count}x ${reason.replaceAll("_", " ")}`)
+            .join(" • ")}
+        </div>
+      )}
+      {checklist.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontSize: 11, color: COLORS.textMuted, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            Próximos passos
+          </span>
+          {checklist.map(step => (
+            <span key={step} style={{ fontSize: 12, color: COLORS.text, lineHeight: 1.4 }}>
+              • {step}
+            </span>
+          ))}
+        </div>
+      )}
+      {latestRunUrl && (
+        <a
+          href={latestRunUrl}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            alignSelf: "flex-start",
+            color: COLORS.info,
+            fontSize: 12,
+            textDecoration: "none",
+            border: `0.5px solid ${COLORS.info}66`,
+            borderRadius: 6,
+            padding: "6px 9px",
+          }}
+        >
+          abrir {latestRunLabel}
+        </a>
+      )}
     </div>
   );
 }
@@ -516,7 +587,7 @@ export default function K6PerformanceSection({ performance }) {
 
       {!hasEnoughHistory
         ? (
-          <EmptyState message="Histórico insuficiente de k6. O dashboard precisa de pelo menos 2 runs com summary JSON para mostrar tendência." />
+          <K6InsufficientHistory performance={performance} />
         )
         : (
           <>

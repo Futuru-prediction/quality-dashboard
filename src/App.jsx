@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import JSZip from "jszip";
 import {
   COVERAGE_ARTIFACT_NAME_HINTS,
@@ -19,6 +19,10 @@ import {
   aggregateFlakyTests,
   extractPlaywrightTestCases,
 } from "./lib/playwrightFlakiness.js";
+import {
+  filterIssuesByScope,
+  summarizeRunsByScope,
+} from "./lib/dashboardMetrics.js";
 import K6PerformanceSection from "./components/K6PerformanceSection.jsx";
 
 const REPOS = [
@@ -29,6 +33,7 @@ const REPOS = [
 ];
 const ORG = "Futuru-prediction";
 const LINEAR_PROJECT = "FTU";
+const QUALITY_DASHBOARD_LABEL = "quality dashboard";
 const COVERAGE_THRESHOLDS = {
   "futuru-frontend": 70,
   "futuru-core": 80,
@@ -48,8 +53,8 @@ const COLORS = {
   danger: "#e05252",
   info: "#4a9eff",
   text: "#e8eaed",
-  textMuted: "#6b7280",
-  textDim: "#3d4451",
+  textMuted: "#8a93a3",
+  textDim: "#647083",
   success: "#22c55e",
 };
 
@@ -64,6 +69,10 @@ const css = `
   @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
   @keyframes spin { to{transform:rotate(360deg)} }
   @keyframes scanline { 0%{transform:translateY(-100%)} 100%{transform:translateY(400%)} }
+  button:focus-visible, a:focus-visible, input:focus-visible {
+    outline: 2px solid ${COLORS.accentBorder};
+    outline-offset: 2px;
+  }
 `;
 
 const mono = { fontFamily: "'JetBrains Mono', monospace" };
@@ -178,6 +187,42 @@ function EmptyState({ message }) {
   );
 }
 
+function SectionErrorNotice({ message, onRetry, disabled = false }) {
+  return (
+    <div style={{
+      marginBottom: 12,
+      background: `${COLORS.danger}14`,
+      border: `0.5px solid ${COLORS.danger}4a`,
+      borderRadius: 8,
+      padding: "10px 12px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+      flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 12, color: COLORS.danger, lineHeight: 1.4 }}>{message}</span>
+      <button
+        onClick={onRetry}
+        disabled={disabled}
+        style={{
+          background: "transparent",
+          border: `0.5px solid ${COLORS.danger}66`,
+          color: COLORS.danger,
+          borderRadius: 6,
+          padding: "4px 9px",
+          fontSize: 11,
+          cursor: disabled ? "wait" : "pointer",
+          opacity: disabled ? 0.6 : 1,
+          ...mono,
+        }}
+      >
+        {disabled ? "recarregando..." : "tentar novamente"}
+      </button>
+    </div>
+  );
+}
+
 async function ghFetch(path, token) {
   const r = await fetch(`https://api.github.com${path}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
@@ -218,6 +263,23 @@ function looksLikeK6Summary(value) {
     || typeof metrics.http_req_failed === "object"
     || typeof metrics.http_reqs === "object"
   );
+}
+
+function hasK6Metrics(metrics) {
+  if (!metrics || typeof metrics !== "object") return false;
+  return (
+    metrics.p95Ms !== null
+    || metrics.p99Ms !== null
+    || metrics.errorRatePct !== null
+    || metrics.rps !== null
+  );
+}
+
+function formatK6IngestionReason(reason) {
+  if (reason === "missing_artifact") return "artifact k6-summary ausente";
+  if (reason === "invalid_summary") return "summary JSON ausente/inválido";
+  if (reason === "missing_metrics") return "summary sem métricas esperadas";
+  return "causa não identificada";
 }
 
 async function fetchJsonFromArtifact(artifact, token, fileHints, validator = null) {
@@ -272,6 +334,14 @@ async function fetchK6PerformanceHistory(repo, token, workflowRuns) {
     const summary = await fetchJsonFromArtifact(summaryArtifact, token, K6_JSON_FILE_HINTS, looksLikeK6Summary)
       .catch(() => null);
     const parsed = parseK6Summary(summary);
+    const metrics = parsed?.metrics || null;
+    const ingestReason = !summaryArtifact
+      ? "missing_artifact"
+      : !summary
+        ? "invalid_summary"
+        : !hasK6Metrics(metrics)
+          ? "missing_metrics"
+          : "ok";
 
     return {
       runId: run.id,
@@ -280,19 +350,47 @@ async function fetchK6PerformanceHistory(repo, token, workflowRuns) {
       createdAt: run.created_at || null,
       conclusion: run.conclusion || run.status || null,
       artifactName: summaryArtifact?.name || null,
-      metrics: parsed?.metrics || null,
+      metrics,
       thresholds: parsed?.thresholds || null,
+      ingestReason,
     };
   }));
 
-  const validRuns = runs.filter(run => run.metrics && (
-    run.metrics.p95Ms !== null
-    || run.metrics.p99Ms !== null
-    || run.metrics.errorRatePct !== null
-    || run.metrics.rps !== null
-  ));
+  const validRuns = runs.filter(run => hasK6Metrics(run.metrics));
+  const invalidRuns = runs.filter(run => run.ingestReason !== "ok");
+  const reasonCounts = invalidRuns.reduce((acc, run) => {
+    const reason = run.ingestReason || "unknown";
+    acc[reason] = (acc[reason] || 0) + 1;
+    return acc;
+  }, {});
+  const primaryReason = Object.entries(reasonCounts)
+    .sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
-  return buildK6TrendSeries(validRuns, { limit: 10 });
+  const trend = buildK6TrendSeries(validRuns, { limit: 10 });
+  const latestCompletedRun = runs
+    .slice()
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0] || null;
+
+  return {
+    ...trend,
+    diagnostics: {
+      requiredRuns: 2,
+      validRuns: validRuns.length,
+      missingRuns: Math.max(0, 2 - validRuns.length),
+      totalCompletedRuns: completedRuns.length,
+      invalidRuns: invalidRuns.length,
+      reasonCounts,
+      primaryReason,
+      primaryReasonLabel: primaryReason ? formatK6IngestionReason(primaryReason) : null,
+      latestRunUrl: latestCompletedRun?.runUrl || null,
+      latestRunLabel: latestCompletedRun?.runName || latestCompletedRun?.runId || null,
+      checklist: [
+        "Garantir upload do artifact com summary JSON no workflow do futuru-k6.",
+        "Validar se o arquivo contém http_req_duration, http_req_failed e http_reqs.",
+        "Reexecutar o workflow e confirmar no dashboard ao menos 2 runs válidos.",
+      ],
+    },
+  };
 }
 
 export default function App() {
@@ -324,20 +422,69 @@ export default function App() {
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [activeRepo, setActiveRepo] = useState(REPOS[0]);
+  const [issuesScope, setIssuesScope] = useState("quality");
+  const [showAllMobileRuns, setShowAllMobileRuns] = useState(false);
 
   const connect = useCallback(async () => {
     if (!ghToken.trim() || !linToken.trim()) return;
     setLoading(true);
     setError(null);
     try {
+      const sectionErrors = {
+        github: null,
+        coverage: null,
+        playwright: null,
+        linear: null,
+        k6: null,
+      };
+
+      const setSectionError = (section, message) => {
+        if (!sectionErrors[section]) sectionErrors[section] = message;
+      };
+
+      const fetchGithubWithFallback = async (path, fallbackValue, sections, message) => {
+        try {
+          return await ghFetch(path, ghToken);
+        } catch {
+          const targets = Array.isArray(sections) ? sections : [sections];
+          targets.forEach(section => setSectionError(section, message));
+          return fallbackValue;
+        }
+      };
+
       const [reposData, linearData] = await Promise.all([
         Promise.all(REPOS.map(async (repo) => {
           const [repoInfo, runs, commits, branches, artifactsData] = await Promise.all([
-            ghFetch(`/repos/${ORG}/${repo}`, ghToken).catch(() => null),
-            ghFetch(`/repos/${ORG}/${repo}/actions/runs?per_page=15`, ghToken).catch(() => ({ workflow_runs: [] })),
-            ghFetch(`/repos/${ORG}/${repo}/commits?per_page=5`, ghToken).catch(() => []),
-            ghFetch(`/repos/${ORG}/${repo}/branches`, ghToken).catch(() => []),
-            ghFetch(`/repos/${ORG}/${repo}/actions/artifacts?per_page=100`, ghToken).catch(() => ({ artifacts: [] })),
+            fetchGithubWithFallback(
+              `/repos/${ORG}/${repo}`,
+              null,
+              "github",
+              "Falha parcial ao carregar dados do GitHub. Alguns blocos podem estar incompletos.",
+            ),
+            fetchGithubWithFallback(
+              `/repos/${ORG}/${repo}/actions/runs?per_page=15`,
+              { workflow_runs: [] },
+              "github",
+              "Falha parcial ao carregar dados do GitHub. Alguns blocos podem estar incompletos.",
+            ),
+            fetchGithubWithFallback(
+              `/repos/${ORG}/${repo}/commits?per_page=5`,
+              [],
+              "github",
+              "Falha parcial ao carregar dados do GitHub. Alguns blocos podem estar incompletos.",
+            ),
+            fetchGithubWithFallback(
+              `/repos/${ORG}/${repo}/branches`,
+              [],
+              "github",
+              "Falha parcial ao carregar dados do GitHub. Alguns blocos podem estar incompletos.",
+            ),
+            fetchGithubWithFallback(
+              `/repos/${ORG}/${repo}/actions/artifacts?per_page=100`,
+              { artifacts: [] },
+              ["coverage", "playwright"],
+              "Falha ao consultar artifacts do GitHub. Cobertura e Playwright podem aparecer como indisponíveis.",
+            ),
           ]);
 
           const artifacts = artifactsData?.artifacts || [];
@@ -354,8 +501,12 @@ export default function App() {
             .slice(0, 10);
 
           const playwrightRunReports = await Promise.all(completedRuns.map(async (run) => {
-            const runArtifactsData = await ghFetch(`/repos/${ORG}/${repo}/actions/runs/${run.id}/artifacts?per_page=100`, ghToken)
-              .catch(() => ({ artifacts: [] }));
+            const runArtifactsData = await fetchGithubWithFallback(
+              `/repos/${ORG}/${repo}/actions/runs/${run.id}/artifacts?per_page=100`,
+              { artifacts: [] },
+              "playwright",
+              "Falha parcial ao carregar reports do Playwright por run. Alguns detalhes podem estar ausentes.",
+            );
             const runArtifact = pickNewestArtifact(runArtifactsData?.artifacts || [], PLAYWRIGHT_ARTIFACT_NAME_HINTS);
             const report = await fetchJsonFromArtifact(runArtifact, ghToken, PLAYWRIGHT_JSON_FILE_HINTS, looksLikePlaywrightReport).catch(() => null);
             const tests = extractPlaywrightTestCases(report);
@@ -373,7 +524,10 @@ export default function App() {
           }));
 
           const performance = repo === "futuru-k6"
-            ? await fetchK6PerformanceHistory(repo, ghToken, runs.workflow_runs || []).catch(() => null)
+            ? await fetchK6PerformanceHistory(repo, ghToken, runs.workflow_runs || []).catch(() => {
+              setSectionError("k6", "Falha ao carregar histórico de performance do futuru-k6.");
+              return null;
+            })
             : null;
 
           const latestParsedRunReport = playwrightRunReports.find(item => item.report) || null;
@@ -434,16 +588,24 @@ export default function App() {
               createdAt updatedAt url
             }
           }
-        }`, linToken).catch(() => ({ data: { issues: { nodes: [] } } })),
+        }`, linToken).catch(() => {
+          setSectionError("linear", "Falha ao carregar dados do Linear. Seções de issues podem aparecer vazias.");
+          return { data: { issues: { nodes: [] } } };
+        }),
       ]);
 
-      const issues = linearData?.data?.issues?.nodes || [];
+      const linearIssues = linearData?.data?.issues?.nodes;
+      if (!Array.isArray(linearIssues)) {
+        setSectionError("linear", "Falha ao carregar dados do Linear. Seções de issues podem aparecer vazias.");
+      }
+
+      const issues = Array.isArray(linearIssues) ? linearIssues : [];
       const bugs = issues.filter(i => i.labels?.nodes?.some(l => l.name.toLowerCase().includes("bug")));
       const features = issues.filter(i => i.labels?.nodes?.some(l => ["feature", "feat", "enhancement"].some(k => l.name.toLowerCase().includes(k))));
       const inProgress = issues.filter(i => i.state?.type === "started");
       const done = issues.filter(i => i.state?.type === "completed");
 
-      setData({ repos: reposData, issues, bugs, features, inProgress, done });
+      setData({ repos: reposData, issues, bugs, features, inProgress, done, sectionErrors });
       setConnected(true);
     } catch (e) {
       setError(e.message);
@@ -454,9 +616,24 @@ export default function App() {
 
   const activeData = data?.repos?.find(r => r.repo === activeRepo);
   const k6Performance = data?.repos?.find(r => r.repo === "futuru-k6")?.performance || null;
-  const passedRuns = activeData?.runs?.filter(r => r.conclusion === "success").length || 0;
-  const totalRuns = activeData?.runs?.length || 0;
   const unstableTests = activeData?.quality?.unstableTests || [];
+  const sectionErrors = data?.sectionErrors || {};
+  const allIssues = useMemo(() => data?.issues || [], [data?.issues]);
+
+  const scopedIssues = useMemo(
+    () => filterIssuesByScope(allIssues, issuesScope, QUALITY_DASHBOARD_LABEL),
+    [allIssues, issuesScope],
+  );
+
+  const scopedBugs = scopedIssues.filter(i =>
+    i.labels?.nodes?.some(l => String(l.name || "").toLowerCase().includes("bug")),
+  );
+  const scopedFeatures = scopedIssues.filter(i =>
+    i.labels?.nodes?.some(l =>
+      ["feature", "feat", "enhancement"].some(k => String(l.name || "").toLowerCase().includes(k)),
+    ),
+  );
+  const scopedInProgress = scopedIssues.filter(i => i.state?.type === "started");
 
   if (!connected) {
     return (
@@ -536,9 +713,13 @@ export default function App() {
   }
 
   const allRuns = data.repos.flatMap(r => r.runs.map(run => ({ ...run, repoName: r.repo })));
+  const runMetrics = summarizeRunsByScope(allRuns, activeRepo);
   const recentRuns = allRuns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 12);
-  const totalPassed = allRuns.filter(r => r.conclusion === "success").length;
-  const totalFailed = allRuns.filter(r => r.conclusion === "failure").length;
+  const mobileRecentRuns = showAllMobileRuns ? recentRuns : recentRuns.slice(0, 4);
+  const totalPassed = runMetrics.global.passed;
+  const totalFailed = runMetrics.global.failed;
+  const totalRuns = runMetrics.active.total;
+  const passedRuns = runMetrics.active.passed;
   const coverageRows = REPOS.map(repo => ({
     repo,
     ...data.repos.find(r => r.repo === repo)?.quality?.coverage,
@@ -588,11 +769,12 @@ export default function App() {
               setConnected(false);
               setData(null);
               setError(null);
+              setShowAllMobileRuns(false);
               setGhToken("");
               setLinToken("");
             }} style={{
-              marginLeft: 12, background: "transparent", border: `0.5px solid ${COLORS.border}`,
-              borderRadius: 5, padding: "4px 10px", color: COLORS.textMuted, fontSize: 11,
+              marginLeft: 12, background: COLORS.surface, border: `0.5px solid ${COLORS.borderHover}`,
+              borderRadius: 5, padding: "4px 10px", color: "#b8c3d3", fontSize: 11,
               cursor: "pointer", ...mono,
             }}>desconectar</button>
           </div>
@@ -604,17 +786,63 @@ export default function App() {
           flexDirection: "column",
           gap: sectionGap,
         }}>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+            flexWrap: "wrap",
+          }}>
+            <span style={{ fontSize: 11, color: COLORS.textMuted, ...mono, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              Escopo de Issues
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => setIssuesScope("quality")}
+                style={{
+                  background: issuesScope === "quality" ? COLORS.accentDim : "transparent",
+                  border: `0.5px solid ${issuesScope === "quality" ? COLORS.accentBorder : COLORS.border}`,
+                  borderRadius: 6,
+                  padding: "4px 10px",
+                  color: issuesScope === "quality" ? COLORS.accent : COLORS.textMuted,
+                  fontSize: 11,
+                  cursor: "pointer",
+                  ...mono,
+                }}
+              >
+                Quality Dashboard
+              </button>
+              <button
+                onClick={() => setIssuesScope("global")}
+                style={{
+                  background: issuesScope === "global" ? COLORS.accentDim : "transparent",
+                  border: `0.5px solid ${issuesScope === "global" ? COLORS.accentBorder : COLORS.border}`,
+                  borderRadius: 6,
+                  padding: "4px 10px",
+                  color: issuesScope === "global" ? COLORS.accent : COLORS.textMuted,
+                  fontSize: 11,
+                  cursor: "pointer",
+                  ...mono,
+                }}
+              >
+                FTU Global
+              </button>
+            </div>
+          </div>
 
           {/* Stats Row */}
           <div style={{ display: "grid", gridTemplateColumns: statsGridColumns, gap: 12 }}>
             <Stat label="Repos" value={REPOS.length} sub="monitorados" />
-            <Stat label="Issues Total" value={data.issues.length} color={COLORS.info} />
-            <Stat label="Em progresso" value={data.inProgress.length} color={COLORS.warn} />
-            <Stat label="Bugs abertos" value={data.bugs.filter(b => b.state?.type !== "completed").length} color={COLORS.danger} />
-            <Stat label="Runs passou" value={totalPassed} color={COLORS.success} />
-            <Stat label="Runs falhou" value={totalFailed} color={COLORS.danger} />
+            <Stat label={`Issues (${issuesScope === "global" ? "FTU" : "QDB"})`} value={scopedIssues.length} color={COLORS.info} />
+            <Stat label={`Em progresso (${issuesScope === "global" ? "FTU" : "QDB"})`} value={scopedInProgress.length} color={COLORS.warn} />
+            <Stat label={`Bugs abertos (${issuesScope === "global" ? "FTU" : "QDB"})`} value={scopedBugs.filter(b => b.state?.type !== "completed").length} color={COLORS.danger} />
+            <Stat label="Runs passou (global)" value={totalPassed} color={COLORS.success} />
+            <Stat label="Runs falhou (global)" value={totalFailed} color={COLORS.danger} />
           </div>
 
+          {sectionErrors.k6 && (
+            <SectionErrorNotice message={sectionErrors.k6} onRetry={connect} disabled={loading} />
+          )}
           <K6PerformanceSection performance={k6Performance} />
 
           {/* Pipeline + Commits */}
@@ -623,6 +851,9 @@ export default function App() {
             {/* Pipeline Status */}
             <Card>
               <SectionHeader icon="⬡" title="Status dos Pipelines" tag="GitHub Actions" />
+              {sectionErrors.github && (
+                <SectionErrorNotice message={sectionErrors.github} onRetry={connect} disabled={loading} />
+              )}
               <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
                 {REPOS.map(r => (
                   <button key={r} onClick={() => setActiveRepo(r)} style={{
@@ -652,12 +883,15 @@ export default function App() {
                 ))}
               <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
                 <div style={{ flex: 1, background: COLORS.bg, borderRadius: 6, padding: "8px 12px" }}>
-                  <div style={{ fontSize: 10, color: COLORS.textMuted, ...mono, marginBottom: 4 }}>TAXA DE SUCESSO</div>
+                  <div style={{ fontSize: 10, color: COLORS.textMuted, ...mono, marginBottom: 4 }}>TAXA DE SUCESSO (REPO ATIVO)</div>
                   <div style={{ height: 4, background: COLORS.border, borderRadius: 2, overflow: "hidden" }}>
                     <div style={{ height: "100%", width: `${totalRuns ? Math.round(passedRuns / totalRuns * 100) : 0}%`, background: COLORS.success, borderRadius: 2, transition: "width .6s ease" }} />
                   </div>
+                  <div style={{ fontSize: 10, color: COLORS.textMuted, ...mono, marginTop: 4 }}>
+                    {activeRepo.replace("futuru-", "")}
+                  </div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.success, marginTop: 4 }}>
-                    {totalRuns ? Math.round(passedRuns / totalRuns * 100) : 0}%
+                    {runMetrics.active.ratePct}%
                   </div>
                 </div>
               </div>
@@ -666,6 +900,9 @@ export default function App() {
             {/* Últimos Commits / Deploy */}
             <Card>
               <SectionHeader icon="↑" title="Último Deploy / Commits" tag="GitHub" />
+              {sectionErrors.github && (
+                <SectionErrorNotice message={sectionErrors.github} onRetry={connect} disabled={loading} />
+              )}
               {REPOS.map(r => {
                 const rd = data.repos.find(x => x.repo === r);
                 const commit = rd?.commits?.[0];
@@ -696,11 +933,14 @@ export default function App() {
           {/* Test Runs */}
           <Card>
             <SectionHeader icon="▷" title="Test Runs — Todas as Execuções" tag={`${recentRuns.length} recentes`} />
+            {sectionErrors.github && (
+              <SectionErrorNotice message={sectionErrors.github} onRetry={connect} disabled={loading} />
+            )}
             {recentRuns.length === 0
               ? <EmptyState message="Nenhuma execução encontrada" />
               : isMobile
                 ? <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {recentRuns.map(run => {
+                  {mobileRecentRuns.map(run => {
                     const dur = run.updated_at && run.created_at
                       ? Math.round((new Date(run.updated_at) - new Date(run.created_at)) / 1000)
                       : null;
@@ -721,7 +961,12 @@ export default function App() {
                               {run.name}
                             </span>
                           </div>
-                          <Tag color={COLORS.accent}>{run.repoName?.replace("futuru-", "")}</Tag>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <Tag color={COLORS.accent}>{run.repoName?.replace("futuru-", "")}</Tag>
+                            <Tag color={run.conclusion === "success" ? COLORS.success : run.conclusion === "failure" ? COLORS.danger : COLORS.warn}>
+                              {run.conclusion || run.status || "—"}
+                            </Tag>
+                          </div>
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                           <div style={{ minWidth: 0 }}>
@@ -741,6 +986,24 @@ export default function App() {
                       </div>
                     );
                   })}
+                  {recentRuns.length > 4 && (
+                    <button
+                      onClick={() => setShowAllMobileRuns(value => !value)}
+                      style={{
+                        marginTop: 2,
+                        background: "transparent",
+                        border: `0.5px solid ${COLORS.borderHover}`,
+                        borderRadius: 6,
+                        padding: "8px 10px",
+                        color: COLORS.textMuted,
+                        fontSize: 11,
+                        cursor: "pointer",
+                        ...mono,
+                      }}
+                    >
+                      {showAllMobileRuns ? "mostrar menos" : `ver mais (+${recentRuns.length - 4})`}
+                    </button>
+                  )}
                 </div>
                 : <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -780,6 +1043,9 @@ export default function App() {
           <div style={{ display: "grid", gridTemplateColumns: dualGridColumns, gap: 20 }}>
             <Card>
               <SectionHeader icon="◔" title="Cobertura de Código" tag="GitHub Artifacts" />
+              {sectionErrors.coverage && (
+                <SectionErrorNotice message={sectionErrors.coverage} onRetry={connect} disabled={loading} />
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {coverageRows.map(row => {
                   const threshold = COVERAGE_THRESHOLDS[row.repo] || 70;
@@ -813,6 +1079,9 @@ export default function App() {
 
             <Card>
               <SectionHeader icon="◎" title="Playwright Summary" tag="results.json" />
+              {sectionErrors.playwright && (
+                <SectionErrorNotice message={sectionErrors.playwright} onRetry={connect} disabled={loading} />
+              )}
               <div style={{ display: "grid", gridTemplateColumns: triGridColumns, gap: 10, marginBottom: 12 }}>
                 <Stat label="Passed" value={totalExpected} color={COLORS.success} />
                 <Stat label="Failed" value={totalUnexpected} color={COLORS.danger} />
@@ -938,13 +1207,16 @@ export default function App() {
           </Card>
 
           {/* Bugs + Features */}
+          {sectionErrors.linear && (
+            <SectionErrorNotice message={sectionErrors.linear} onRetry={connect} disabled={loading} />
+          )}
           <div style={{ display: "grid", gridTemplateColumns: dualGridColumns, gap: 20 }}>
 
             <Card>
-              <SectionHeader icon="⚠" title="Bugs" tag={`${data.bugs.length} encontrados`} />
-              {data.bugs.length === 0
+              <SectionHeader icon="⚠" title="Bugs" tag={`${scopedBugs.length} encontrados`} />
+              {scopedBugs.length === 0
                 ? <EmptyState message="Nenhum bug com label 'bug' encontrado no Linear" />
-                : data.bugs.slice(0, 8).map(issue => (
+                : scopedBugs.slice(0, 8).map(issue => (
                   <div key={issue.id} style={{ padding: "9px 0", borderBottom: `0.5px solid ${COLORS.border}`, display: "flex", flexDirection: "column", gap: 4 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -965,10 +1237,10 @@ export default function App() {
             </Card>
 
             <Card>
-              <SectionHeader icon="◇" title="Features Testadas" tag={`${data.features.length} mapeadas`} />
-              {data.features.length === 0
+              <SectionHeader icon="◇" title="Features Testadas" tag={`${scopedFeatures.length} mapeadas`} />
+              {scopedFeatures.length === 0
                 ? <EmptyState message="Nenhuma feature com label 'feature/feat' no Linear" />
-                : data.features.slice(0, 8).map(issue => (
+                : scopedFeatures.slice(0, 8).map(issue => (
                   <div key={issue.id} style={{ padding: "9px 0", borderBottom: `0.5px solid ${COLORS.border}`, display: "flex", flexDirection: "column", gap: 4 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
                       <span style={{ fontSize: 10, ...mono, color: COLORS.textMuted }}>{issue.identifier}</span>
@@ -992,11 +1264,11 @@ export default function App() {
 
           {/* Issues em progresso */}
           <Card>
-            <SectionHeader icon="→" title="Em Progresso" tag={`${data.inProgress.length} issues`} />
-            {data.inProgress.length === 0
+            <SectionHeader icon="→" title="Em Progresso" tag={`${scopedInProgress.length} issues`} />
+            {scopedInProgress.length === 0
               ? <EmptyState message="Nenhuma issue em progresso no Linear" />
               : <div style={{ display: "grid", gridTemplateColumns: triGridColumns, gap: 12 }}>
-                {data.inProgress.map(issue => (
+                {scopedInProgress.map(issue => (
                   <a key={issue.id} href={issue.url} target="_blank" rel="noreferrer" style={{
                     textDecoration: "none", background: COLORS.bg,
                     border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "12px 14px",
