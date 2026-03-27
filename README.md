@@ -117,6 +117,27 @@ git push -u origin main
 
 Deploy automático acontece a cada push na `main`.
 
+### CI/CD com Sentry
+
+O workflow de deploy em `.github/workflows/deploy.yml` agora:
+
+- cria uma release do Sentry por build/deploy usando o commit SHA (`github.sha`)
+- gera sourcemaps no build do Vite
+- faz upload dos sourcemaps do artefato de build antes do deploy na Vercel
+- falha com mensagem clara se qualquer segredo do Sentry estiver ausente
+
+Secrets obrigatórios no GitHub Actions:
+
+- `SENTRY_AUTH_TOKEN`
+- `SENTRY_ORG`
+- `SENTRY_PROJECT`
+
+Secrets obrigatórios da Vercel continuam os mesmos:
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
+
 ---
 
 ## Estrutura do projeto

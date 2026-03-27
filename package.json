@@ -13,6 +13,7 @@
     "test:e2e:report": "playwright show-report e2e/report/html"
   },
   "dependencies": {
+    "@sentry/react": "^10.46.0",
     "jszip": "^3.10.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

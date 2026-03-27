@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import JSZip from "jszip";
 import {
   COVERAGE_ARTIFACT_NAME_HINTS,
@@ -10,9 +10,16 @@ import {
   safeJsonParse,
 } from "./lib/githubArtifacts.js";
 import {
+  K6_ARTIFACT_NAME_HINTS,
+  K6_JSON_FILE_HINTS,
+  buildK6TrendSeries,
+  parseK6Summary,
+} from "./lib/k6Metrics.js";
+import {
   aggregateFlakyTests,
   extractPlaywrightTestCases,
 } from "./lib/playwrightFlakiness.js";
+import K6PerformanceSection from "./components/K6PerformanceSection.jsx";
 
 const REPOS = [
   "futuru-frontend",
@@ -61,6 +68,21 @@ const css = `
 
 const mono = { fontFamily: "'JetBrains Mono', monospace" };
 
+function useViewportWidth() {
+  const [width, setWidth] = useState(
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  return width;
+}
+
 function Tag({ color = COLORS.accent, children }) {
   return (
     <span style={{
@@ -104,6 +126,7 @@ function Card({ children, style = {} }) {
     <div style={{
       background: COLORS.surface, border: `0.5px solid ${COLORS.border}`,
       borderRadius: 10, padding: "20px 22px", animation: "fadeIn .35s ease",
+      minWidth: 0,
       ...style,
     }}>{children}</div>
   );
@@ -177,6 +200,16 @@ function looksLikeCoverageSummary(value) {
   return !!value && typeof value === "object" && typeof value.total === "object";
 }
 
+function looksLikeK6Summary(value) {
+  if (!value || typeof value !== "object") return false;
+  const metrics = value.metrics && typeof value.metrics === "object" ? value.metrics : value;
+  return !!metrics && typeof metrics === "object" && (
+    typeof metrics.http_req_duration === "object"
+    || typeof metrics.http_req_failed === "object"
+    || typeof metrics.http_reqs === "object"
+  );
+}
+
 async function fetchJsonFromArtifact(artifact, token, fileHints, validator = null) {
   if (!artifact?.archive_download_url) return null;
 
@@ -215,7 +248,62 @@ async function fetchJsonFromArtifact(artifact, token, fileHints, validator = nul
   return null;
 }
 
+async function fetchK6PerformanceHistory(repo, token, workflowRuns) {
+  const completedRuns = (Array.isArray(workflowRuns) ? workflowRuns : [])
+    .filter(run => run && run.status === "completed")
+    .slice(0, 15);
+
+  const runs = await Promise.all(completedRuns.map(async (run) => {
+    const runArtifactsData = await ghFetch(`/repos/${ORG}/${repo}/actions/runs/${run.id}/artifacts?per_page=100`, token)
+      .catch(() => ({ artifacts: [] }));
+    const runArtifacts = Array.isArray(runArtifactsData?.artifacts) ? runArtifactsData.artifacts : [];
+    const summaryArtifact = pickNewestArtifact(runArtifacts, K6_ARTIFACT_NAME_HINTS)
+      || pickNewestArtifact(runArtifacts, []);
+    const summary = await fetchJsonFromArtifact(summaryArtifact, token, K6_JSON_FILE_HINTS, looksLikeK6Summary)
+      .catch(() => null);
+    const parsed = parseK6Summary(summary);
+
+    return {
+      runId: run.id,
+      runName: run.name || null,
+      runUrl: run.html_url || null,
+      createdAt: run.created_at || null,
+      conclusion: run.conclusion || run.status || null,
+      artifactName: summaryArtifact?.name || null,
+      metrics: parsed?.metrics || null,
+      thresholds: parsed?.thresholds || null,
+    };
+  }));
+
+  const validRuns = runs.filter(run => run.metrics && (
+    run.metrics.p95Ms !== null
+    || run.metrics.p99Ms !== null
+    || run.metrics.errorRatePct !== null
+    || run.metrics.rps !== null
+  ));
+
+  return buildK6TrendSeries(validRuns, { limit: 10 });
+}
+
 export default function App() {
+  const viewportWidth = useViewportWidth();
+  const isMobile = viewportWidth <= 640;
+  const isTablet = viewportWidth <= 980;
+  const pagePaddingX = isMobile ? 14 : isTablet ? 20 : 32;
+  const contentPaddingY = isMobile ? 18 : 28;
+  const sectionGap = isMobile ? 18 : 28;
+  const statsGridColumns = isMobile
+    ? "repeat(2, minmax(0, 1fr))"
+    : isTablet
+      ? "repeat(3, minmax(0, 1fr))"
+      : "repeat(6, minmax(0, 1fr))";
+  const dualGridColumns = isTablet ? "1fr" : "1fr 1fr";
+  const triGridColumns = isMobile
+    ? "1fr"
+    : isTablet
+      ? "repeat(2, minmax(0, 1fr))"
+      : "repeat(3, minmax(0, 1fr))";
+
   const [ghToken, setGhToken] = useState(import.meta.env.VITE_GITHUB_TOKEN || "");
   const [linToken, setLinToken] = useState(import.meta.env.VITE_LINEAR_TOKEN || "");
   const [connected, setConnected] = useState(false);
@@ -233,7 +321,7 @@ export default function App() {
         Promise.all(REPOS.map(async (repo) => {
           const [repoInfo, runs, commits, branches, artifactsData] = await Promise.all([
             ghFetch(`/repos/${ORG}/${repo}`, ghToken).catch(() => null),
-            ghFetch(`/repos/${ORG}/${repo}/actions/runs?per_page=10`, ghToken).catch(() => ({ workflow_runs: [] })),
+            ghFetch(`/repos/${ORG}/${repo}/actions/runs?per_page=15`, ghToken).catch(() => ({ workflow_runs: [] })),
             ghFetch(`/repos/${ORG}/${repo}/commits?per_page=5`, ghToken).catch(() => []),
             ghFetch(`/repos/${ORG}/${repo}/branches`, ghToken).catch(() => []),
             ghFetch(`/repos/${ORG}/${repo}/actions/artifacts?per_page=100`, ghToken).catch(() => ({ artifacts: [] })),
@@ -270,6 +358,10 @@ export default function App() {
               tests,
             };
           }));
+
+          const performance = repo === "futuru-k6"
+            ? await fetchK6PerformanceHistory(repo, ghToken, runs.workflow_runs || []).catch(() => null)
+            : null;
 
           const latestParsedRunReport = playwrightRunReports.find(item => item.report) || null;
           const resolvedPlaywrightReport = playwrightReport || latestParsedRunReport?.report || null;
@@ -309,6 +401,7 @@ export default function App() {
             },
             unstableTests,
             playwrightRunReports,
+            performance,
           };
 
           return {
@@ -347,6 +440,7 @@ export default function App() {
   }, [ghToken, linToken]);
 
   const activeData = data?.repos?.find(r => r.repo === activeRepo);
+  const k6Performance = data?.repos?.find(r => r.repo === "futuru-k6")?.performance || null;
   const passedRuns = activeData?.runs?.filter(r => r.conclusion === "success").length || 0;
   const totalRuns = activeData?.runs?.length || 0;
   const unstableTests = activeData?.quality?.unstableTests || [];
@@ -461,7 +555,11 @@ export default function App() {
         {/* Header */}
         <div style={{
           borderBottom: `0.5px solid ${COLORS.border}`,
-          padding: "16px 32px", display: "flex", alignItems: "center",
+          padding: `${isMobile ? 12 : 16}px ${pagePaddingX}px`,
+          display: "flex",
+          alignItems: "center",
+          flexWrap: isMobile ? "wrap" : "nowrap",
+          rowGap: 8,
           justifyContent: "space-between", position: "sticky", top: 0,
           background: COLORS.bg + "ee", backdropFilter: "blur(8px)", zIndex: 10,
         }}>
@@ -473,7 +571,13 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: COLORS.success, animation: "pulse 2s infinite" }} />
             <span style={{ fontSize: 11, color: COLORS.textMuted, ...mono }}>LIVE</span>
-            <button onClick={() => { setConnected(false); setData(null); }} style={{
+            <button onClick={() => {
+              setConnected(false);
+              setData(null);
+              setError(null);
+              setGhToken("");
+              setLinToken("");
+            }} style={{
               marginLeft: 12, background: "transparent", border: `0.5px solid ${COLORS.border}`,
               borderRadius: 5, padding: "4px 10px", color: COLORS.textMuted, fontSize: 11,
               cursor: "pointer", ...mono,
@@ -481,10 +585,15 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 28 }}>
+        <div style={{
+          padding: `${contentPaddingY}px ${pagePaddingX}px`,
+          display: "flex",
+          flexDirection: "column",
+          gap: sectionGap,
+        }}>
 
           {/* Stats Row */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: statsGridColumns, gap: 12 }}>
             <Stat label="Repos" value={REPOS.length} sub="monitorados" />
             <Stat label="Issues Total" value={data.issues.length} color={COLORS.info} />
             <Stat label="Em progresso" value={data.inProgress.length} color={COLORS.warn} />
@@ -493,8 +602,10 @@ export default function App() {
             <Stat label="Runs falhou" value={totalFailed} color={COLORS.danger} />
           </div>
 
+          <K6PerformanceSection performance={k6Performance} />
+
           {/* Pipeline + Commits */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: dualGridColumns, gap: 20 }}>
 
             {/* Pipeline Status */}
             <Card>
@@ -608,7 +719,7 @@ export default function App() {
           </Card>
 
           {/* Coverage + Playwright Summary */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: dualGridColumns, gap: 20 }}>
             <Card>
               <SectionHeader icon="◔" title="Cobertura de Código" tag="GitHub Artifacts" />
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -644,7 +755,7 @@ export default function App() {
 
             <Card>
               <SectionHeader icon="◎" title="Playwright Summary" tag="results.json" />
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 10, marginBottom: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: triGridColumns, gap: 10, marginBottom: 12 }}>
                 <Stat label="Passed" value={totalExpected} color={COLORS.success} />
                 <Stat label="Failed" value={totalUnexpected} color={COLORS.danger} />
                 <Stat label="Flaky" value={totalFlaky} color={COLORS.warn} />
@@ -736,7 +847,7 @@ export default function App() {
           </Card>
 
           {/* Bugs + Features */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: dualGridColumns, gap: 20 }}>
 
             <Card>
               <SectionHeader icon="⚠" title="Bugs" tag={`${data.bugs.length} encontrados`} />
@@ -793,7 +904,7 @@ export default function App() {
             <SectionHeader icon="→" title="Em Progresso" tag={`${data.inProgress.length} issues`} />
             {data.inProgress.length === 0
               ? <EmptyState message="Nenhuma issue em progresso no Linear" />
-              : <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12 }}>
+              : <div style={{ display: "grid", gridTemplateColumns: triGridColumns, gap: 12 }}>
                 {data.inProgress.map(issue => (
                   <a key={issue.id} href={issue.url} target="_blank" rel="noreferrer" style={{
                     textDecoration: "none", background: COLORS.bg,
