@@ -1,4 +1,4 @@
-# FTU-247 - Sentry alerting, ownership, and Slack routing
+# FTU-247 - Sentry alerting, ownership, and chat routing
 
 Operational runbook for alerting on `quality-dashboard`.
 
@@ -11,6 +11,7 @@ This document is aligned with the current repo workflow:
 - Optional browser Sentry env vars are `VITE_SENTRY_DSN`, `VITE_SENTRY_ENVIRONMENT`, and `VITE_SENTRY_RELEASE`
 
 For provisioning and secret placement, keep using [docs/provisioning/sentry.md](../provisioning/sentry.md).
+For execution and closure evidence specific to WhatsApp routing, use [docs/operations/FTU-247-whatsapp-closure-playbook.md](./FTU-247-whatsapp-closure-playbook.md).
 
 ## Objective
 
@@ -28,7 +29,7 @@ Use a small set of rules with clear routing. Prefer production-only paging and l
 
 | Rule | What it catches | Suggested trigger | Route |
 |---|---|---|---|
-| Error rate spike | Broad browser/runtime failures | Production error rate above baseline, or a sustained spike over a 5-minute window | Frontend owner, with Slack notification |
+| Error rate spike | Broad browser/runtime failures | Production error rate above baseline, or a sustained spike over a 5-minute window | Frontend owner, with chat notification |
 | New regression after deploy | Fresh issue introduced by a release | New issue first seen in the current `github.sha` release, especially if it has repeats or affects multiple users | Frontend owner first, infra informed if it looks platform-related |
 | Release health drop | A bad release with elevated crash/error activity | Release health below the agreed threshold for the production release | Frontend owner + on-call fallback |
 | High-severity issue | Failures that block the dashboard itself | Error fingerprint tied to app boot, auth, API bootstrap, or page load | Frontend owner immediately, then on-call fallback if unacknowledged |
@@ -56,7 +57,7 @@ Use a simple ownership model with one primary owner and one fallback owner.
 | UI rendering / client runtime errors | Frontend owner | Infra owner if the failure looks deployment-related | On-call fallback |
 | Auth / token / integration failures | Frontend owner | Infra owner if it is environment, secret, or release related | On-call fallback |
 | Release health degradation | Frontend owner | Infra owner | On-call fallback |
-| Slack or routing failures | Infra owner | Frontend owner | On-call fallback |
+| Chat routing failures | Infra owner | Frontend owner | On-call fallback |
 
 Recommended ownership fields:
 
@@ -70,30 +71,38 @@ Recommended triage rule:
 - The infra owner owns Vercel, GitHub Actions, Sentry routing, and environment drift.
 - The on-call fallback is the escalation path when the primary owner does not acknowledge within the agreed window.
 
-## Slack integration and routing
+## Chat integration and routing (WhatsApp via webhook bridge)
 
-Use Slack as the notification surface, not as the alert source of truth.
+Use WhatsApp as the notification surface for this project through a webhook bridge. Sentry sends `event.alert` payloads to the bridge, and the bridge forwards normalized messages to WhatsApp.
+
+Current provider decision: `Z-API` ([z-api.io](https://www.z-api.io/)).
 
 ### Setup steps
 
-1. In Sentry, install or enable the Slack integration for the organization that owns `quality-dashboard`.
-2. Connect the team Slack workspace and authorize the channels that should receive alerts.
-3. Create a dedicated channel for production quality alerts, for example `#quality-alerts`.
-4. Add a smaller team channel if you want non-paging visibility, for example `#frontend-quality`.
-5. Map production alerts to `#quality-alerts`.
-6. Map lower-severity preview or staging alerts to a quieter channel or suppress them entirely.
-7. Verify that messages include release, environment, issue title, and direct links back to Sentry.
+1. Deploy the bridge endpoint in this repo: `POST /api/sentry-whatsapp-webhook`.
+2. Configure Vercel env vars:
+   - `SENTRY_TO_WHATSAPP_SECRET`
+   - `WHATSAPP_ALERT_DESTINATIONS` (comma-separated)
+   - `ZAPI_INSTANCE_ID`
+   - `ZAPI_INSTANCE_TOKEN`
+   - `ZAPI_CLIENT_TOKEN` (optional)
+3. In Sentry, create a Service Hook (`event.alert`) targeting:
+   - `https://<seu-dominio>/api/sentry-whatsapp-webhook?secret=<SENTRY_TO_WHATSAPP_SECRET>`
+4. In Z-API, confirm instance is connected and destination format is valid (number/group ID expected by provider).
+5. Configure production destination (group/number) for high-priority alerts.
+6. Configure non-production destination (group/number) or suppress lower-priority alerts.
+7. Verify outgoing messages include release, environment, issue title, and direct Sentry links.
 
 ### Routing rules
 
-- Production error spikes: send to `#quality-alerts`.
-- New regressions: send to `#quality-alerts` and tag the frontend owner.
-- Release health failures: send to `#quality-alerts`, then escalate to on-call if unacked.
-- Non-production noise: send to the team-only channel or keep as digest-only.
+- Production error spikes: send to WhatsApp production destination.
+- New regressions: send to production destination with owner context.
+- Release health failures: send to production destination, then escalate to on-call if unacked.
+- Non-production noise: send to non-production destination or keep as digest-only.
 
 ### Message content to require
 
-Every Slack alert should include:
+Every WhatsApp alert should include:
 
 - Environment
 - Sentry release SHA
@@ -115,7 +124,7 @@ Use this checklist before turning on paging:
 - Known flaky browser errors are merged, ignored, or annotated.
 - Alerts tied to a single user only page if they are release-blocking.
 - Source maps are uploading successfully, so stack traces are readable.
-- Slack routing is tested end to end before enabling production paging.
+- WhatsApp routing is tested end to end before enabling production paging.
 - The owner map is documented and the fallback path is explicit.
 
 Suggested calibration loop:
@@ -134,7 +143,7 @@ Agenda:
 1. Review all Sentry alerts from the last 7 days.
 2. Check which alerts were actionable and which were noise.
 3. Verify the current production release has no unresolved high-severity issues.
-4. Review Slack routing and confirm alerts landed in the right channel.
+4. Review chat routing and confirm alerts landed in the right destination.
 5. Confirm ownership handoff: frontend, infra, or on-call fallback.
 6. Record any threshold changes, suppressions, or ownership updates.
 
@@ -153,7 +162,7 @@ This work is ready when all of the following are true:
 - The runbook names the current environments and secrets used by the repo.
 - At least one production error-rate rule, one regression rule, and one release-health rule are defined.
 - The ownership model includes frontend, infra, and on-call fallback routing.
-- Slack routing is documented with a production channel and a quieter non-production path.
+- Chat routing is documented with a production channel and a quieter non-production path.
 - An anti-noise checklist exists and is usable before paging is enabled.
 - A weekly review cadence is documented.
 
@@ -165,8 +174,8 @@ Use these steps to prove the setup works:
 2. Confirm the workflow sets the Sentry release from `github.sha`.
 3. Confirm the Vercel production deploy uses the same production environment name as the workflow.
 4. Trigger or simulate a controlled Sentry test issue in production or a safe non-paging environment.
-5. Verify the alert lands in the correct Slack channel.
-6. Verify the Slack message includes the release SHA, environment, and direct Sentry link.
+5. Verify the alert lands in the correct WhatsApp destination.
+6. Verify the WhatsApp message includes the release SHA, environment, and direct Sentry link.
 7. Verify the alert routes to the documented owner and fallback path.
 8. Record the outcome in the weekly review notes.
 

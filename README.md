@@ -138,7 +138,12 @@ Secrets obrigatórios da Vercel continuam os mesmos:
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 
-Runbook operacional de alertas, ownership e Slack: [docs/operations/sentry-alerting.md](docs/operations/sentry-alerting.md)
+Runbook operacional de alertas, ownership e roteamento de notificações (WhatsApp via webhook): [docs/operations/sentry-alerting.md](docs/operations/sentry-alerting.md)
+
+Bridge endpoint implementado para Sentry -> WhatsApp (Z-API):
+
+- `POST /api/sentry-whatsapp-webhook`
+- Arquivo: `api/sentry-whatsapp-webhook.js`
 
 ---
 
