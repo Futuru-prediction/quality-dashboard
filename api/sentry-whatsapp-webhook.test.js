@@ -218,3 +218,42 @@ test("returns 502 when at least one provider send fails", async () => {
   assert.equal(res.out.payload.totalCount, 2);
   assert.equal(res.out.payload.results[1].ok, false);
 });
+
+test("returns 502 with timeout metadata when provider request aborts", async () => {
+  setBaseProviderEnv();
+  process.env.WHATSAPP_ALERT_DESTINATIONS = "5511999999999";
+  process.env.SENTRY_TO_WHATSAPP_TIMEOUT_MS = "1200";
+
+  global.fetch = async () => {
+    const error = new Error("This operation was aborted");
+    error.name = "AbortError";
+    throw error;
+  };
+
+  const req = makeReq({
+    headers: { "sentry-hook-resource": "event.alert" },
+    query: { secret: "super-secret" },
+    body: {
+      action: "triggered",
+      data: {
+        triggered_rule: "Rule Timeout",
+        event: {
+          title: "Synthetic timeout",
+          environment: "production",
+          release: "sha-timeout",
+        },
+      },
+    },
+  });
+  const res = makeRes();
+
+  await handler(req, res);
+
+  assert.equal(res.out.statusCode, 502);
+  assert.equal(res.out.payload.ok, false);
+  assert.equal(res.out.payload.totalCount, 1);
+  assert.equal(res.out.payload.results[0].ok, false);
+  assert.equal(res.out.payload.results[0].status, 504);
+  assert.equal(res.out.payload.results[0].errorType, "timeout");
+  assert.equal(res.out.payload.results[0].payload.error, "provider_timeout");
+});

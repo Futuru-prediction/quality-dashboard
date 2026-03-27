@@ -17,6 +17,9 @@ import {
 } from "../src/lib/sentryWhatsappBridge.js";
 
 const ZAPI_BASE_URL = "https://api.z-api.io";
+const DEFAULT_PROVIDER_TIMEOUT_MS = 8000;
+const MIN_PROVIDER_TIMEOUT_MS = 500;
+const MAX_PROVIDER_TIMEOUT_MS = 60000;
 
 function createRequestId(req) {
   const externalId = req.headers["x-request-id"];
@@ -29,7 +32,41 @@ function logBridgeEvent(level, payload) {
   logger(JSON.stringify({ scope: "sentry-whatsapp-bridge", ...payload }));
 }
 
-async function sendZApiTextMessage({ instanceId, instanceToken, clientToken, phone, message }) {
+function resolveProviderTimeoutMs() {
+  const rawTimeout = Number(process.env.SENTRY_TO_WHATSAPP_TIMEOUT_MS);
+  if (!Number.isFinite(rawTimeout)) return DEFAULT_PROVIDER_TIMEOUT_MS;
+  return Math.min(MAX_PROVIDER_TIMEOUT_MS, Math.max(MIN_PROVIDER_TIMEOUT_MS, Math.floor(rawTimeout)));
+}
+
+function createTimeoutSignal(timeoutMs) {
+  if (typeof AbortController === "undefined") {
+    return { signal: undefined, clear: () => {} };
+  }
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeoutHandle),
+  };
+}
+
+function isAbortError(error) {
+  return (
+    error?.name === "AbortError" ||
+    (typeof error?.message === "string" &&
+      error.message.toLowerCase().includes("abort"))
+  );
+}
+
+async function sendZApiTextMessage({
+  instanceId,
+  instanceToken,
+  clientToken,
+  phone,
+  message,
+  timeoutMs,
+}) {
   const endpoint = `${ZAPI_BASE_URL}/instances/${instanceId}/token/${instanceToken}/send-text`;
   const headers = {
     "Content-Type": "application/json",
@@ -37,24 +74,45 @@ async function sendZApiTextMessage({ instanceId, instanceToken, clientToken, pho
 
   if (clientToken) headers["Client-Token"] = clientToken;
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ phone, message }),
-  });
-
-  let payload = null;
+  const timeout = createTimeoutSignal(timeoutMs);
   try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ phone, message }),
+      signal: timeout.signal,
+    });
 
-  return {
-    ok: response.ok,
-    status: response.status,
-    payload,
-  };
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      payload,
+      errorType: null,
+    };
+  } catch (error) {
+    const aborted = isAbortError(error);
+    return {
+      ok: false,
+      status: aborted ? 504 : 502,
+      payload: {
+        error: aborted ? "provider_timeout" : "provider_unreachable",
+        detail:
+          error instanceof Error && typeof error.message === "string"
+            ? error.message
+            : String(error || "unknown_error"),
+      },
+      errorType: aborted ? "timeout" : "network",
+    };
+  } finally {
+    timeout.clear();
+  }
 }
 
 export default async function handler(req, res) {
@@ -121,6 +179,7 @@ export default async function handler(req, res) {
   const instanceToken = process.env.ZAPI_INSTANCE_TOKEN;
   const clientToken = process.env.ZAPI_CLIENT_TOKEN || "";
   const destinations = splitDestinations(process.env.WHATSAPP_ALERT_DESTINATIONS);
+  const providerTimeoutMs = resolveProviderTimeoutMs();
 
   if (!instanceId || !instanceToken || destinations.length === 0) {
     const missingDetail = [
@@ -157,6 +216,7 @@ export default async function handler(req, res) {
     environment,
     release,
     destinationCount: destinations.length,
+    providerTimeoutMs,
   });
 
   const message = buildAlertMessage(payload);
@@ -170,6 +230,7 @@ export default async function handler(req, res) {
       clientToken,
       phone,
       message,
+      timeoutMs: providerTimeoutMs,
     });
     results.push({ phone, ...sendResult });
 
@@ -179,6 +240,7 @@ export default async function handler(req, res) {
       phone,
       providerStatus: sendResult.status,
       providerOk: sendResult.ok,
+      providerErrorType: sendResult.errorType,
       providerMessageId:
         sendResult.payload?.messageId || sendResult.payload?.id || null,
     });
