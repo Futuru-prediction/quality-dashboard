@@ -257,3 +257,39 @@ test("returns 502 with timeout metadata when provider request aborts", async () 
   assert.equal(res.out.payload.results[0].errorType, "timeout");
   assert.equal(res.out.payload.results[0].payload.error, "provider_timeout");
 });
+
+test("returns 502 with network metadata when provider request fails before response", async () => {
+  setBaseProviderEnv();
+  process.env.WHATSAPP_ALERT_DESTINATIONS = "5511999999999";
+
+  global.fetch = async () => {
+    throw new Error("getaddrinfo ENOTFOUND api.z-api.io");
+  };
+
+  const req = makeReq({
+    headers: { "sentry-hook-resource": "event.alert" },
+    query: { secret: "super-secret" },
+    body: {
+      action: "triggered",
+      data: {
+        triggered_rule: "Rule Network",
+        event: {
+          title: "Synthetic network failure",
+          environment: "production",
+          release: "sha-network",
+        },
+      },
+    },
+  });
+  const res = makeRes();
+
+  await handler(req, res);
+
+  assert.equal(res.out.statusCode, 502);
+  assert.equal(res.out.payload.ok, false);
+  assert.equal(res.out.payload.totalCount, 1);
+  assert.equal(res.out.payload.results[0].ok, false);
+  assert.equal(res.out.payload.results[0].status, 502);
+  assert.equal(res.out.payload.results[0].errorType, "network");
+  assert.equal(res.out.payload.results[0].payload.error, "provider_unreachable");
+});
