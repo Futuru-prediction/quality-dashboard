@@ -54,6 +54,19 @@ VITE_GITHUB_TOKEN=ghp_...
 VITE_LINEAR_TOKEN=lin_api_...
 ```
 
+Para o bridge Sentry -> WhatsApp (quando habilitado no deploy), configure também:
+
+```env
+SENTRY_TO_WHATSAPP_SECRET=...
+WHATSAPP_ALERT_DESTINATIONS=5511999999999,1203@g.us
+SENTRY_TO_WHATSAPP_TIMEOUT_MS=8000
+ZAPI_INSTANCE_ID=...
+ZAPI_INSTANCE_TOKEN=...
+ZAPI_CLIENT_TOKEN=...
+```
+
+`SENTRY_TO_WHATSAPP_TIMEOUT_MS` é opcional. Default: `8000` ms. Faixa aceita: `500` a `60000` ms.
+
 > **Nunca commite o `.env`** — ele já está no `.gitignore`.
 
 ### 4. Rodar
@@ -179,7 +192,9 @@ O workflow `.github/workflows/e2e.yml` roda em `push`, `pull_request` e `workflo
 
 - instala dependências e browser (`chromium`)
 - executa Playwright contra preview local da branch em teste
-- publica artifacts HTML e JSON do report
+- publica artifacts HTML e JSON do report com identificador da execução:
+  - `playwright-html-report-<run_id>-<run_attempt>`
+  - `playwright-json-report-<run_id>-<run_attempt>`
 - atua como quality gate de PR (falha de teste quebra o check)
 
 Runbook operacional de alertas, ownership e roteamento de notificações (WhatsApp via webhook): [docs/operations/sentry-alerting.md](docs/operations/sentry-alerting.md)
@@ -254,14 +269,15 @@ O org (`Futuru-prediction`) é configurado na constante `ORG` logo abaixo.
 |---|---|---|
 | 1 — MVP | Dashboard com GitHub + Linear | ✅ Done |
 | 2 — Deploy + Observabilidade | URL pública + Sentry + bridge WhatsApp | ✅ Done |
-| 3 — Qualidade de CI | E2E por PR (preview local) + contratos do webhook | 🔄 Em andamento |
-| 4 — Higiene de docs | README/runbooks sincronizados | 🔄 Em andamento |
+| 3 — Qualidade de CI | E2E por PR (preview local) + contratos do webhook | ✅ Done |
+| 4 — Higiene de docs | README/runbooks sincronizados | ✅ Done |
 
 Issues do ciclo atual:
 
-- `FTU-384` — CI E2E por PR com quality gate
-- `FTU-385` — cobertura de contratos do webhook
-- `FTU-386` — sincronização de README e runbooks
+- `FTU-391` — artifacts E2E com identificador por run/attempt
+- `FTU-392` — atualização de roadmap com fases concluídas
+- `FTU-393` — documentação de `SENTRY_TO_WHATSAPP_TIMEOUT_MS`
+- `FTU-394` — teste dedicado para erro de rede no webhook
 
 ---
 

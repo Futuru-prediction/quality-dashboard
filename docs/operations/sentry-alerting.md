@@ -83,6 +83,7 @@ Current provider decision: `Z-API` ([z-api.io](https://www.z-api.io/)).
 2. Configure Vercel env vars:
    - `SENTRY_TO_WHATSAPP_SECRET`
    - `WHATSAPP_ALERT_DESTINATIONS` (comma-separated)
+   - `SENTRY_TO_WHATSAPP_TIMEOUT_MS` (optional, default `8000`, range `500`-`60000`)
    - `ZAPI_INSTANCE_ID`
    - `ZAPI_INSTANCE_TOKEN`
    - `ZAPI_CLIENT_TOKEN` (optional)
@@ -128,6 +129,11 @@ Bridge status quick map:
 - `500 missing_env`: missing `SENTRY_TO_WHATSAPP_SECRET` or `ZAPI_*`/destinations.
 - `502`: bridge called provider but at least one destination failed in Z-API.
 - `200`: bridge accepted and provider returned success for all destinations.
+
+Provider-level details are exposed in payload/logs:
+
+- `errorType=timeout` with provider status `504`: provider request timed out.
+- `errorType=network` with provider status `502`: provider request failed before response.
 
 Operational logs emitted by bridge:
 
