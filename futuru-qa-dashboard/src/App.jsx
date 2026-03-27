@@ -144,8 +144,8 @@ async function linearFetch(query, token) {
 }
 
 export default function App() {
-  const [ghToken, setGhToken] = useState("");
-  const [linToken, setLinToken] = useState("");
+  const [ghToken, setGhToken] = useState(import.meta.env.VITE_GITHUB_TOKEN || "");
+  const [linToken, setLinToken] = useState(import.meta.env.VITE_LINEAR_TOKEN || "");
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
