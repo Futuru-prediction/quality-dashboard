@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
+import JSZip from "jszip";
 
 const REPOS = [
   "futuru-frontend",
@@ -8,6 +9,12 @@ const REPOS = [
 ];
 const ORG = "Futuru-prediction";
 const LINEAR_PROJECT = "FTU";
+const COVERAGE_THRESHOLDS = {
+  "futuru-frontend": 70,
+  "futuru-core": 80,
+  "futuru-bff": 70,
+  "futuru-k6": 70,
+};
 
 const COLORS = {
   bg: "#0a0c0f",
@@ -143,6 +150,27 @@ async function linearFetch(query, token) {
   return r.json();
 }
 
+function pickNewestArtifact(artifacts, patterns) {
+  return (artifacts || [])
+    .filter(a => !a.expired && patterns.some(p => a.name?.toLowerCase().includes(p)))
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+}
+
+async function fetchArtifactJson(artifact, token, fileRegex) {
+  if (!artifact?.archive_download_url) return null;
+  const zipRes = await fetch(artifact.archive_download_url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+    redirect: "follow",
+  });
+  if (!zipRes.ok) return null;
+  const zipBuf = await zipRes.arrayBuffer();
+  const zip = await JSZip.loadAsync(zipBuf);
+  const jsonFile = Object.values(zip.files).find(f => !f.dir && fileRegex.test(f.name));
+  if (!jsonFile) return null;
+  const raw = await jsonFile.async("text");
+  return JSON.parse(raw);
+}
+
 export default function App() {
   const [ghToken, setGhToken] = useState(import.meta.env.VITE_GITHUB_TOKEN || "");
   const [linToken, setLinToken] = useState(import.meta.env.VITE_LINEAR_TOKEN || "");
@@ -159,13 +187,64 @@ export default function App() {
     try {
       const [reposData, linearData] = await Promise.all([
         Promise.all(REPOS.map(async (repo) => {
-          const [repoInfo, runs, commits, branches] = await Promise.all([
+          const [repoInfo, runs, commits, branches, artifactsData] = await Promise.all([
             ghFetch(`/repos/${ORG}/${repo}`, ghToken).catch(() => null),
             ghFetch(`/repos/${ORG}/${repo}/actions/runs?per_page=10`, ghToken).catch(() => ({ workflow_runs: [] })),
             ghFetch(`/repos/${ORG}/${repo}/commits?per_page=5`, ghToken).catch(() => []),
             ghFetch(`/repos/${ORG}/${repo}/branches`, ghToken).catch(() => []),
+            ghFetch(`/repos/${ORG}/${repo}/actions/artifacts?per_page=100`, ghToken).catch(() => ({ artifacts: [] })),
           ]);
-          return { repo, repoInfo, runs: runs.workflow_runs || [], commits: Array.isArray(commits) ? commits : [], branches: Array.isArray(branches) ? branches : [] };
+
+          const artifacts = artifactsData?.artifacts || [];
+          const playwrightArtifact = pickNewestArtifact(artifacts, ["playwright-json-report", "smoke-results-json", "critical-results-json", "playwright-json", "results-json"]);
+          const coverageArtifact = pickNewestArtifact(artifacts, ["coverage-summary", "coverage"]);
+
+          const [playwrightReport, coverageReport] = await Promise.all([
+            fetchArtifactJson(playwrightArtifact, ghToken, /(^|\/)results\.json$/i).catch(() => null),
+            fetchArtifactJson(coverageArtifact, ghToken, /(coverage-summary\.json|summary\.json)$/i).catch(() => null),
+          ]);
+
+          const stats = playwrightReport?.stats || {};
+          const coverageTotal = coverageReport?.total || {};
+          const linesPct = Number(coverageTotal?.lines?.pct);
+          const statementsPct = Number(coverageTotal?.statements?.pct);
+          const coveragePct = Number.isFinite(linesPct)
+            ? linesPct
+            : (Number.isFinite(statementsPct) ? statementsPct : null);
+
+          const quality = {
+            playwright: {
+              expected: Number(stats.expected) || 0,
+              unexpected: Number(stats.unexpected) || 0,
+              flaky: Number(stats.flaky) || 0,
+              skipped: Number(stats.skipped) || 0,
+              durationMs: Number(stats.duration) || 0,
+              artifactName: playwrightArtifact?.name || null,
+              runUrl: playwrightArtifact?.workflow_run?.id
+                ? `https://github.com/${ORG}/${repo}/actions/runs/${playwrightArtifact.workflow_run.id}`
+                : null,
+            },
+            coverage: {
+              pct: coveragePct,
+              linesPct: Number.isFinite(linesPct) ? linesPct : null,
+              branchesPct: Number(coverageTotal?.branches?.pct) || null,
+              functionsPct: Number(coverageTotal?.functions?.pct) || null,
+              statementsPct: Number.isFinite(statementsPct) ? statementsPct : null,
+              artifactName: coverageArtifact?.name || null,
+              runUrl: coverageArtifact?.workflow_run?.id
+                ? `https://github.com/${ORG}/${repo}/actions/runs/${coverageArtifact.workflow_run.id}`
+                : null,
+            },
+          };
+
+          return {
+            repo,
+            repoInfo,
+            runs: runs.workflow_runs || [],
+            commits: Array.isArray(commits) ? commits : [],
+            branches: Array.isArray(branches) ? branches : [],
+            quality,
+          };
         })),
         linearFetch(`{
           issues(filter: { team: { key: { eq: "${LINEAR_PROJECT}" } } }, first: 50, orderBy: updatedAt) {
@@ -194,7 +273,6 @@ export default function App() {
   }, [ghToken, linToken]);
 
   const activeData = data?.repos?.find(r => r.repo === activeRepo);
-  const latestRun = activeData?.runs?.[0];
   const passedRuns = activeData?.runs?.filter(r => r.conclusion === "success").length || 0;
   const totalRuns = activeData?.runs?.length || 0;
 
@@ -279,6 +357,17 @@ export default function App() {
   const recentRuns = allRuns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 12);
   const totalPassed = allRuns.filter(r => r.conclusion === "success").length;
   const totalFailed = allRuns.filter(r => r.conclusion === "failure").length;
+  const coverageRows = REPOS.map(repo => ({
+    repo,
+    ...data.repos.find(r => r.repo === repo)?.quality?.coverage,
+  }));
+  const playwrightRows = REPOS.map(repo => ({
+    repo,
+    ...data.repos.find(r => r.repo === repo)?.quality?.playwright,
+  }));
+  const totalExpected = playwrightRows.reduce((sum, r) => sum + (r.expected || 0), 0);
+  const totalUnexpected = playwrightRows.reduce((sum, r) => sum + (r.unexpected || 0), 0);
+  const totalFlaky = playwrightRows.reduce((sum, r) => sum + (r.flaky || 0), 0);
 
   const fmt = (iso) => {
     if (!iso) return "—";
@@ -442,6 +531,73 @@ export default function App() {
               </table>
             </div>
           </Card>
+
+          {/* Coverage + Playwright Summary */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <Card>
+              <SectionHeader icon="◔" title="Cobertura de Código" tag="GitHub Artifacts" />
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {coverageRows.map(row => {
+                  const threshold = COVERAGE_THRESHOLDS[row.repo] || 70;
+                  const hasPct = typeof row.pct === "number";
+                  const ok = hasPct && row.pct >= threshold;
+                  const pctColor = !hasPct ? COLORS.textMuted : ok ? COLORS.success : COLORS.danger;
+                  return (
+                    <div key={row.repo} style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      borderBottom: `0.5px solid ${COLORS.border}`, padding: "8px 0",
+                    }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span style={{ fontSize: 11, ...mono, color: COLORS.accent }}>{row.repo.replace("futuru-", "")}</span>
+                        <span style={{ fontSize: 11, color: COLORS.textMuted }}>
+                          {row.artifactName
+                            ? `threshold ${threshold}%`
+                            : "sem artifact coverage-summary"}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {row.runUrl && <a href={row.runUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: COLORS.info, ...mono }}>run</a>}
+                        <span style={{ fontSize: 18, fontWeight: 800, color: pctColor }}>
+                          {hasPct ? `${Math.round(row.pct)}%` : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card>
+              <SectionHeader icon="◎" title="Playwright Summary" tag="results.json" />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 10, marginBottom: 12 }}>
+                <Stat label="Passed" value={totalExpected} color={COLORS.success} />
+                <Stat label="Failed" value={totalUnexpected} color={COLORS.danger} />
+                <Stat label="Flaky" value={totalFlaky} color={COLORS.warn} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {playwrightRows.map(row => {
+                  const hasArtifact = !!row.artifactName;
+                  return (
+                    <div key={row.repo} style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      borderBottom: `0.5px solid ${COLORS.border}`, padding: "8px 0",
+                    }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span style={{ fontSize: 11, ...mono, color: COLORS.accent }}>{row.repo.replace("futuru-", "")}</span>
+                        <span style={{ fontSize: 11, color: COLORS.textMuted }}>
+                          {hasArtifact ? `P:${row.expected || 0} F:${row.unexpected || 0} Fl:${row.flaky || 0}` : "sem artifact results.json"}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {row.runUrl && <a href={row.runUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: COLORS.info, ...mono }}>run</a>}
+                        <Tag color={hasArtifact ? COLORS.success : COLORS.textMuted}>{hasArtifact ? "ok" : "n/a"}</Tag>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          </div>
 
           {/* Bugs + Features */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>

@@ -28,3 +28,5 @@ dist-ssr
 e2e/report/
 e2e/test-results/
 test-results/
+.vercel
+.env*.local
