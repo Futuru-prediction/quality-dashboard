@@ -696,39 +696,84 @@ export default function App() {
           {/* Test Runs */}
           <Card>
             <SectionHeader icon="▷" title="Test Runs — Todas as Execuções" tag={`${recentRuns.length} recentes`} />
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr style={{ borderBottom: `0.5px solid ${COLORS.border}` }}>
-                    {["Status", "Workflow", "Repo", "Branch", "Iniciado", "Duração"].map(h => (
-                      <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: COLORS.textMuted, ...mono, fontSize: 10, fontWeight: 500, letterSpacing: "0.06em", textTransform: "uppercase" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentRuns.length === 0
-                    ? <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: COLORS.textMuted }}>Nenhuma execução encontrada</td></tr>
-                    : recentRuns.map(run => {
-                      const dur = run.updated_at && run.created_at
-                        ? Math.round((new Date(run.updated_at) - new Date(run.created_at)) / 1000)
-                        : null;
-                      return (
-                        <tr key={run.id} style={{ borderBottom: `0.5px solid ${COLORS.border}`, transition: "background .1s" }}
-                          onMouseEnter={e => e.currentTarget.style.background = COLORS.surface}
-                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                        >
-                          <td style={{ padding: "8px 10px" }}><StatusDot status={run.conclusion || run.status} /></td>
-                          <td style={{ padding: "8px 10px", maxWidth: 200, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.name}</td>
-                          <td style={{ padding: "8px 10px" }}><Tag color={COLORS.accent}>{run.repoName?.replace("futuru-", "")}</Tag></td>
-                          <td style={{ padding: "8px 10px", ...mono, color: COLORS.textMuted, fontSize: 11 }}>{run.head_branch}</td>
-                          <td style={{ padding: "8px 10px", ...mono, color: COLORS.textMuted, fontSize: 11 }}>{fmt(run.created_at)}</td>
-                          <td style={{ padding: "8px 10px", ...mono, fontSize: 11 }}>{dur ? `${dur}s` : "—"}</td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
+            {recentRuns.length === 0
+              ? <EmptyState message="Nenhuma execução encontrada" />
+              : isMobile
+                ? <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {recentRuns.map(run => {
+                    const dur = run.updated_at && run.created_at
+                      ? Math.round((new Date(run.updated_at) - new Date(run.created_at)) / 1000)
+                      : null;
+                    return (
+                      <div key={run.id} style={{
+                        border: `0.5px solid ${COLORS.border}`,
+                        borderRadius: 8,
+                        padding: "10px 12px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        background: COLORS.bg,
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                            <StatusDot status={run.conclusion || run.status} />
+                            <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, minWidth: 0 }}>
+                              {run.name}
+                            </span>
+                          </div>
+                          <Tag color={COLORS.accent}>{run.repoName?.replace("futuru-", "")}</Tag>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 10, color: COLORS.textMuted, ...mono, textTransform: "uppercase" }}>Branch</div>
+                            <div style={{ fontSize: 11, color: COLORS.text, ...mono, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {run.head_branch || "—"}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 10, color: COLORS.textMuted, ...mono, textTransform: "uppercase" }}>Duração</div>
+                            <div style={{ fontSize: 11, color: COLORS.text, ...mono }}>{dur ? `${dur}s` : "—"}</div>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, color: COLORS.textMuted, ...mono }}>
+                          Iniciado: {fmt(run.created_at)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                : <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `0.5px solid ${COLORS.border}` }}>
+                        {["Status", "Workflow", "Repo", "Branch", "Iniciado", "Duração"].map(h => (
+                          <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: COLORS.textMuted, ...mono, fontSize: 10, fontWeight: 500, letterSpacing: "0.06em", textTransform: "uppercase" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentRuns.map(run => {
+                        const dur = run.updated_at && run.created_at
+                          ? Math.round((new Date(run.updated_at) - new Date(run.created_at)) / 1000)
+                          : null;
+                        return (
+                          <tr key={run.id} style={{ borderBottom: `0.5px solid ${COLORS.border}`, transition: "background .1s" }}
+                            onMouseEnter={e => e.currentTarget.style.background = COLORS.surface}
+                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                          >
+                            <td style={{ padding: "8px 10px" }}><StatusDot status={run.conclusion || run.status} /></td>
+                            <td style={{ padding: "8px 10px", maxWidth: 200, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.name}</td>
+                            <td style={{ padding: "8px 10px" }}><Tag color={COLORS.accent}>{run.repoName?.replace("futuru-", "")}</Tag></td>
+                            <td style={{ padding: "8px 10px", ...mono, color: COLORS.textMuted, fontSize: 11 }}>{run.head_branch}</td>
+                            <td style={{ padding: "8px 10px", ...mono, color: COLORS.textMuted, fontSize: 11 }}>{fmt(run.created_at)}</td>
+                            <td style={{ padding: "8px 10px", ...mono, fontSize: 11 }}>{dur ? `${dur}s` : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+            }
           </Card>
 
           {/* Coverage + Playwright Summary */}
@@ -819,43 +864,76 @@ export default function App() {
             </div>
             {unstableTests.length === 0
               ? <EmptyState message={`Nenhum teste instável encontrado nos últimos 10 runs de ${activeRepo.replace("futuru-", "")}`} />
-              : <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ borderBottom: `0.5px solid ${COLORS.border}` }}>
-                      {["Teste", "Falhas (10)", "Última falha", "Run"].map(h => (
-                        <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: COLORS.textMuted, ...mono, fontSize: 10, fontWeight: 500, letterSpacing: "0.06em", textTransform: "uppercase" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {unstableTests.map(test => (
-                      <tr key={test.key} style={{ borderBottom: `0.5px solid ${COLORS.border}` }}>
-                        <td style={{ padding: "9px 10px", maxWidth: 320 }}>
-                          <div style={{ fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {test.name}
-                          </div>
-                        </td>
-                        <td style={{ padding: "9px 10px" }}>
-                          <Tag color={test.failures >= 3 ? COLORS.danger : COLORS.warn}>
-                            {test.failures} falhas
-                          </Tag>
-                        </td>
-                        <td style={{ padding: "9px 10px", ...mono, color: COLORS.textMuted, fontSize: 11 }}>
-                          {fmt(test.lastFailureAt)}
-                        </td>
-                        <td style={{ padding: "9px 10px" }}>
-                          {test.lastFailureRunUrl
-                            ? <a href={test.lastFailureRunUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.info, ...mono, fontSize: 11 }}>
-                              abrir run
-                            </a>
-                            : <span style={{ color: COLORS.textMuted, ...mono, fontSize: 11 }}>sem link</span>}
-                        </td>
+              : isMobile
+                ? <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {unstableTests.map(test => (
+                    <div key={test.key} style={{
+                      border: `0.5px solid ${COLORS.border}`,
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                      background: COLORS.bg,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4, minWidth: 0 }}>
+                          {test.name}
+                        </div>
+                        <Tag color={test.failures >= 3 ? COLORS.danger : COLORS.warn}>
+                          {test.failures} falhas
+                        </Tag>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <span style={{ fontSize: 11, color: COLORS.textMuted, ...mono }}>
+                          Última falha: {fmt(test.lastFailureAt)}
+                        </span>
+                        {test.lastFailureRunUrl
+                          ? <a href={test.lastFailureRunUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.info, ...mono, fontSize: 11 }}>
+                            abrir run
+                          </a>
+                          : <span style={{ color: COLORS.textMuted, ...mono, fontSize: 11 }}>sem link</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                : <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `0.5px solid ${COLORS.border}` }}>
+                        {["Teste", "Falhas (10)", "Última falha", "Run"].map(h => (
+                          <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: COLORS.textMuted, ...mono, fontSize: 10, fontWeight: 500, letterSpacing: "0.06em", textTransform: "uppercase" }}>{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {unstableTests.map(test => (
+                        <tr key={test.key} style={{ borderBottom: `0.5px solid ${COLORS.border}` }}>
+                          <td style={{ padding: "9px 10px", maxWidth: 320 }}>
+                            <div style={{ fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {test.name}
+                            </div>
+                          </td>
+                          <td style={{ padding: "9px 10px" }}>
+                            <Tag color={test.failures >= 3 ? COLORS.danger : COLORS.warn}>
+                              {test.failures} falhas
+                            </Tag>
+                          </td>
+                          <td style={{ padding: "9px 10px", ...mono, color: COLORS.textMuted, fontSize: 11 }}>
+                            {fmt(test.lastFailureAt)}
+                          </td>
+                          <td style={{ padding: "9px 10px" }}>
+                            {test.lastFailureRunUrl
+                              ? <a href={test.lastFailureRunUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.info, ...mono, fontSize: 11 }}>
+                                abrir run
+                              </a>
+                              : <span style={{ color: COLORS.textMuted, ...mono, fontSize: 11 }}>sem link</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
             }
           </Card>
 
