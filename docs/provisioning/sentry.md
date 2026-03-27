@@ -64,3 +64,16 @@ The current deploy workflow already expects the Vercel secrets above. For Sentry
 - Keep all secrets out of source control.
 - Use placeholder values in `.env.example`.
 - Prefer a single source of truth for the Sentry release name and environment labels across Vercel and GitHub Actions.
+
+## Privacy policy
+
+The browser client applies privacy filtering before any event or breadcrumb is sent to Sentry:
+
+- Email addresses are masked in strings and user metadata.
+- Token-like values are redacted when they appear in sensitive fields such as authorization headers, API keys, session/cookie values, bearer tokens, CSRF/XSRF values, and password-like fields.
+- Request URLs are normalized to remove query strings and fragments before they leave the app.
+- Breadcrumb payloads are sanitized recursively so request/query data does not leak through console, fetch, navigation, or custom breadcrumb metadata.
+- The client does not send default PII from the browser SDK.
+- Known non-actionable browser noise is dropped conservatively, including ResizeObserver loop warnings, non-error promise rejections, and generic script errors.
+
+The sanitizer is defensive: if it fails for any reason, Sentry initialization still proceeds and the app keeps running.

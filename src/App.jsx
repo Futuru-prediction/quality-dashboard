@@ -83,6 +83,16 @@ function useViewportWidth() {
   return width;
 }
 
+function shouldForceErrorBoundary() {
+  if (!import.meta.env.DEV || typeof window === "undefined") return false;
+
+  try {
+    return window.localStorage.getItem("FTU_FORCE_ERROR_BOUNDARY") === "1";
+  } catch {
+    return false;
+  }
+}
+
 function Tag({ color = COLORS.accent, children }) {
   return (
     <span style={{
@@ -287,6 +297,9 @@ async function fetchK6PerformanceHistory(repo, token, workflowRuns) {
 
 export default function App() {
   const viewportWidth = useViewportWidth();
+  if (shouldForceErrorBoundary()) {
+    throw new Error("FTU-244 forced error boundary validation");
+  }
   const isMobile = viewportWidth <= 640;
   const isTablet = viewportWidth <= 980;
   const pagePaddingX = isMobile ? 14 : isTablet ? 20 : 32;

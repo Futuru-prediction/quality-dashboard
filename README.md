@@ -138,6 +138,8 @@ Secrets obrigatórios da Vercel continuam os mesmos:
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 
+Runbook operacional de alertas, ownership e Slack: [docs/operations/sentry-alerting.md](docs/operations/sentry-alerting.md)
+
 ---
 
 ## Estrutura do projeto
