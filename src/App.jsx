@@ -1,5 +1,18 @@
 import { useState, useCallback } from "react";
 import JSZip from "jszip";
+import {
+  COVERAGE_ARTIFACT_NAME_HINTS,
+  COVERAGE_JSON_FILE_HINTS,
+  PLAYWRIGHT_ARTIFACT_NAME_HINTS,
+  PLAYWRIGHT_JSON_FILE_HINTS,
+  pickBestMatchingFileName,
+  pickNewestArtifact,
+  safeJsonParse,
+} from "./lib/githubArtifacts.js";
+import {
+  aggregateFlakyTests,
+  extractPlaywrightTestCases,
+} from "./lib/playwrightFlakiness.js";
 
 const REPOS = [
   "futuru-frontend",
@@ -150,25 +163,56 @@ async function linearFetch(query, token) {
   return r.json();
 }
 
-function pickNewestArtifact(artifacts, patterns) {
-  return (artifacts || [])
-    .filter(a => !a.expired && patterns.some(p => a.name?.toLowerCase().includes(p)))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+function looksLikePlaywrightReport(value) {
+  return !!value && typeof value === "object" && (
+    Array.isArray(value.suites)
+    || Array.isArray(value.tests)
+    || Array.isArray(value.specs)
+    || typeof value.stats === "object"
+    || typeof value.config === "object"
+  );
 }
 
-async function fetchArtifactJson(artifact, token, fileRegex) {
+function looksLikeCoverageSummary(value) {
+  return !!value && typeof value === "object" && typeof value.total === "object";
+}
+
+async function fetchJsonFromArtifact(artifact, token, fileHints, validator = null) {
   if (!artifact?.archive_download_url) return null;
+
   const zipRes = await fetch(artifact.archive_download_url, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
     redirect: "follow",
-  });
-  if (!zipRes.ok) return null;
-  const zipBuf = await zipRes.arrayBuffer();
-  const zip = await JSZip.loadAsync(zipBuf);
-  const jsonFile = Object.values(zip.files).find(f => !f.dir && fileRegex.test(f.name));
-  if (!jsonFile) return null;
-  const raw = await jsonFile.async("text");
-  return JSON.parse(raw);
+  }).catch(() => null);
+  if (!zipRes?.ok) return null;
+
+  const zipBuf = await zipRes.arrayBuffer().catch(() => null);
+  if (!zipBuf) return null;
+
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(zipBuf);
+  } catch {
+    return null;
+  }
+
+  const fileNames = Object.values(zip.files)
+    .filter(file => !file.dir)
+    .map(file => file.name);
+  const preferred = pickBestMatchingFileName(fileNames, fileHints);
+  const fallback = fileNames.filter(name => name.toLowerCase().endsWith(".json") || name.toLowerCase().includes("json"));
+  const ordered = [...new Set([preferred, ...fallback].filter(Boolean))];
+
+  for (const fileName of ordered) {
+    const file = zip.file(fileName);
+    if (!file) continue;
+
+    const raw = await file.async("text").catch(() => null);
+    const parsed = safeJsonParse(raw);
+    if (parsed !== null && (!validator || validator(parsed))) return parsed;
+  }
+
+  return null;
 }
 
 export default function App() {
@@ -196,21 +240,47 @@ export default function App() {
           ]);
 
           const artifacts = artifactsData?.artifacts || [];
-          const playwrightArtifact = pickNewestArtifact(artifacts, ["playwright-json-report", "smoke-results-json", "critical-results-json", "playwright-json", "results-json"]);
-          const coverageArtifact = pickNewestArtifact(artifacts, ["coverage-summary", "coverage"]);
+          const playwrightArtifact = pickNewestArtifact(artifacts, PLAYWRIGHT_ARTIFACT_NAME_HINTS);
+          const coverageArtifact = pickNewestArtifact(artifacts, COVERAGE_ARTIFACT_NAME_HINTS);
 
           const [playwrightReport, coverageReport] = await Promise.all([
-            fetchArtifactJson(playwrightArtifact, ghToken, /(^|\/)results\.json$/i).catch(() => null),
-            fetchArtifactJson(coverageArtifact, ghToken, /(coverage-summary\.json|summary\.json)$/i).catch(() => null),
+            fetchJsonFromArtifact(playwrightArtifact, ghToken, PLAYWRIGHT_JSON_FILE_HINTS, looksLikePlaywrightReport).catch(() => null),
+            fetchJsonFromArtifact(coverageArtifact, ghToken, COVERAGE_JSON_FILE_HINTS, looksLikeCoverageSummary).catch(() => null),
           ]);
 
-          const stats = playwrightReport?.stats || {};
+          const completedRuns = (runs.workflow_runs || [])
+            .filter(run => run.status === "completed")
+            .slice(0, 10);
+
+          const playwrightRunReports = await Promise.all(completedRuns.map(async (run) => {
+            const runArtifactsData = await ghFetch(`/repos/${ORG}/${repo}/actions/runs/${run.id}/artifacts?per_page=100`, ghToken)
+              .catch(() => ({ artifacts: [] }));
+            const runArtifact = pickNewestArtifact(runArtifactsData?.artifacts || [], PLAYWRIGHT_ARTIFACT_NAME_HINTS);
+            const report = await fetchJsonFromArtifact(runArtifact, ghToken, PLAYWRIGHT_JSON_FILE_HINTS, looksLikePlaywrightReport).catch(() => null);
+            const tests = extractPlaywrightTestCases(report);
+
+            return {
+              runId: run.id,
+              runName: run.name || null,
+              runUrl: run.html_url || null,
+              createdAt: run.created_at || null,
+              conclusion: run.conclusion || run.status || null,
+              artifactName: runArtifact?.name || null,
+              report,
+              tests,
+            };
+          }));
+
+          const latestParsedRunReport = playwrightRunReports.find(item => item.report) || null;
+          const resolvedPlaywrightReport = playwrightReport || latestParsedRunReport?.report || null;
+          const stats = resolvedPlaywrightReport?.stats || {};
           const coverageTotal = coverageReport?.total || {};
           const linesPct = Number(coverageTotal?.lines?.pct);
           const statementsPct = Number(coverageTotal?.statements?.pct);
           const coveragePct = Number.isFinite(linesPct)
             ? linesPct
             : (Number.isFinite(statementsPct) ? statementsPct : null);
+          const unstableTests = aggregateFlakyTests(playwrightRunReports, { limit: 10 });
 
           const quality = {
             playwright: {
@@ -219,10 +289,12 @@ export default function App() {
               flaky: Number(stats.flaky) || 0,
               skipped: Number(stats.skipped) || 0,
               durationMs: Number(stats.duration) || 0,
-              artifactName: playwrightArtifact?.name || null,
-              runUrl: playwrightArtifact?.workflow_run?.id
-                ? `https://github.com/${ORG}/${repo}/actions/runs/${playwrightArtifact.workflow_run.id}`
-                : null,
+              artifactName: playwrightArtifact?.name || latestParsedRunReport?.artifactName || null,
+              runUrl: playwrightArtifact?.workflow_run?.html_url
+                || latestParsedRunReport?.runUrl
+                || (playwrightArtifact?.workflow_run?.id
+                  ? `https://github.com/${ORG}/${repo}/actions/runs/${playwrightArtifact.workflow_run.id}`
+                  : null),
             },
             coverage: {
               pct: coveragePct,
@@ -235,6 +307,8 @@ export default function App() {
                 ? `https://github.com/${ORG}/${repo}/actions/runs/${coverageArtifact.workflow_run.id}`
                 : null,
             },
+            unstableTests,
+            playwrightRunReports,
           };
 
           return {
@@ -275,6 +349,7 @@ export default function App() {
   const activeData = data?.repos?.find(r => r.repo === activeRepo);
   const passedRuns = activeData?.runs?.filter(r => r.conclusion === "success").length || 0;
   const totalRuns = activeData?.runs?.length || 0;
+  const unstableTests = activeData?.quality?.unstableTests || [];
 
   if (!connected) {
     return (
@@ -598,6 +673,67 @@ export default function App() {
               </div>
             </Card>
           </div>
+
+          {/* Testes Instáveis */}
+          <Card>
+            <SectionHeader icon="!" title="Testes instáveis" />
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 14,
+            }}>
+              <span style={{ fontSize: 11, color: COLORS.textMuted, lineHeight: 1.5 }}>
+                {"Critério: falhou >= 2 e passou >= 1 nas últimas 10 execuções do Playwright para o repositório ativo."}
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Tag color={unstableTests.length > 0 ? COLORS.warn : COLORS.textMuted}>{`${unstableTests.length} casos`}</Tag>
+                <Tag color={COLORS.info}>{activeRepo.replace("futuru-", "")}</Tag>
+              </div>
+            </div>
+            {unstableTests.length === 0
+              ? <EmptyState message={`Nenhum teste instável encontrado nos últimos 10 runs de ${activeRepo.replace("futuru-", "")}`} />
+              : <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `0.5px solid ${COLORS.border}` }}>
+                      {["Teste", "Falhas (10)", "Última falha", "Run"].map(h => (
+                        <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: COLORS.textMuted, ...mono, fontSize: 10, fontWeight: 500, letterSpacing: "0.06em", textTransform: "uppercase" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unstableTests.map(test => (
+                      <tr key={test.key} style={{ borderBottom: `0.5px solid ${COLORS.border}` }}>
+                        <td style={{ padding: "9px 10px", maxWidth: 320 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {test.name}
+                          </div>
+                        </td>
+                        <td style={{ padding: "9px 10px" }}>
+                          <Tag color={test.failures >= 3 ? COLORS.danger : COLORS.warn}>
+                            {test.failures} falhas
+                          </Tag>
+                        </td>
+                        <td style={{ padding: "9px 10px", ...mono, color: COLORS.textMuted, fontSize: 11 }}>
+                          {fmt(test.lastFailureAt)}
+                        </td>
+                        <td style={{ padding: "9px 10px" }}>
+                          {test.lastFailureRunUrl
+                            ? <a href={test.lastFailureRunUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.info, ...mono, fontSize: 11 }}>
+                              abrir run
+                            </a>
+                            : <span style={{ color: COLORS.textMuted, ...mono, fontSize: 11 }}>sem link</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            }
+          </Card>
 
           {/* Bugs + Features */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
