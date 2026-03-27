@@ -4,6 +4,10 @@ Purpose: verify on every production deploy that the alerting chain is alive:
 
 `Sentry rule` -> `Service Hook (event.alert)` -> `bridge endpoint` -> `Z-API` -> `WhatsApp destination`.
 
+Baseline reliability patch for webhook parsing and metadata normalization was merged in PR #1:
+
+- https://github.com/Futuru-prediction/quality-dashboard/pull/1
+
 ## Trigger convention
 
 Use a unique marker to avoid ambiguity:

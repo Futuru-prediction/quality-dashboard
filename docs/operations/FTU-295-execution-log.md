@@ -53,10 +53,17 @@ Operational steps executed:
 
 Post-closure reliability and operations hardening are tracked in dedicated tasks:
 
-- `FTU-349` - reliable Sentry service hook triggering
-- `FTU-350` - deploy canary E2E for alerting
-- `FTU-352` - operational observability in webhook bridge
-- `FTU-353` - secret rotation and post-rotation validation
+- `FTU-349` - reliable Sentry service hook triggering (Done, PR #1 merged on 2026-03-27)
+- `FTU-350` - deploy canary E2E for alerting (In Progress)
+- `FTU-352` - operational observability in webhook bridge (Done)
+- `FTU-353` - secret rotation and post-rotation validation (Done)
+
+Delivered in `FTU-349`:
+
+- Refactor of webhook parsing/normalization for multiple payload formats.
+- Destination normalization hardening.
+- Dedicated unit tests for bridge parsing and metadata extraction.
+- Pull request: https://github.com/Futuru-prediction/quality-dashboard/pull/1
 
 ## Evidence checklist to close FTU-295 / FTU-247
 
