@@ -42,26 +42,30 @@ const COVERAGE_THRESHOLDS = {
 };
 
 const COLORS = {
-  bg: "#0a0c0f",
-  surface: "#111418",
-  border: "#1e2329",
-  borderHover: "#2d3440",
-  accent: "#00e5a0",
-  accentDim: "#00e5a020",
-  accentBorder: "#00e5a040",
-  warn: "#f5a623",
-  danger: "#e05252",
-  info: "#4a9eff",
-  text: "#e8eaed",
-  textMuted: "#8a93a3",
-  textDim: "#647083",
-  success: "#22c55e",
+  bg: "#070b14",
+  surface: "#111b2e",
+  border: "#24324a",
+  borderHover: "#314764",
+  accent: "#1dd6a5",
+  accentDim: "#1dd6a522",
+  accentBorder: "#1dd6a566",
+  warn: "#f4b455",
+  danger: "#ff6b6b",
+  info: "#56a7ff",
+  text: "#edf3ff",
+  textMuted: "#a4b2c8",
+  textDim: "#7f8ea5",
+  success: "#33d17a",
 };
 
 const css = `
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@500;600;700;800&family=Sora:wght@500;600;700;800&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: ${COLORS.bg}; color: ${COLORS.text}; font-family: 'Syne', sans-serif; }
+  body {
+    background: radial-gradient(1200px 560px at 15% -10%, #123057 0%, transparent 65%), ${COLORS.bg};
+    color: ${COLORS.text};
+    font-family: 'Manrope', sans-serif;
+  }
   ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: ${COLORS.border}; border-radius: 2px; }
   input { font-family: 'JetBrains Mono', monospace; }
@@ -105,8 +109,8 @@ function shouldForceErrorBoundary() {
 function Tag({ color = COLORS.accent, children }) {
   return (
     <span style={{
-      ...mono, fontSize: 10, fontWeight: 600, letterSpacing: "0.08em",
-      padding: "2px 7px", borderRadius: 3,
+      ...mono, fontSize: 11, fontWeight: 600, letterSpacing: "0.08em",
+      padding: "3px 8px", borderRadius: 4,
       background: color + "20", color, border: `0.5px solid ${color}40`,
       textTransform: "uppercase",
     }}>{children}</span>
@@ -117,24 +121,24 @@ function Stat({ label, value, sub, color = COLORS.accent, loading }) {
   return (
     <div style={{
       background: COLORS.surface, border: `0.5px solid ${COLORS.border}`,
-      borderRadius: 8, padding: "16px 18px", display: "flex",
+      borderRadius: 14, padding: "18px 20px", display: "flex",
       flexDirection: "column", gap: 6, animation: "fadeIn .4s ease",
     }}>
-      <span style={{ fontSize: 11, color: COLORS.textMuted, ...mono, letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</span>
+      <span style={{ fontSize: 12, color: COLORS.textMuted, ...mono, letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</span>
       {loading
-        ? <div style={{ height: 28, background: COLORS.border, borderRadius: 4, animation: "pulse 1.4s infinite" }} />
-        : <span style={{ fontSize: 26, fontWeight: 800, color, lineHeight: 1 }}>{value ?? "—"}</span>
+        ? <div style={{ height: 30, background: COLORS.border, borderRadius: 6, animation: "pulse 1.4s infinite" }} />
+        : <span style={{ fontSize: 30, fontWeight: 800, color, lineHeight: 1, fontFamily: "'Sora', sans-serif" }}>{value ?? "—"}</span>
       }
-      {sub && <span style={{ fontSize: 11, color: COLORS.textMuted }}>{sub}</span>}
+      {sub && <span style={{ fontSize: 12, color: COLORS.textMuted }}>{sub}</span>}
     </div>
   );
 }
 
 function SectionHeader({ icon, title, tag }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-      <span style={{ fontSize: 16 }}>{icon}</span>
-      <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em" }}>{title}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+      <span style={{ fontSize: 18 }}>{icon}</span>
+      <span style={{ fontWeight: 700, fontSize: 18, letterSpacing: "-0.01em", fontFamily: "'Sora', sans-serif" }}>{title}</span>
       {tag && <Tag>{tag}</Tag>}
     </div>
   );
@@ -144,7 +148,7 @@ function Card({ children, style = {} }) {
   return (
     <div style={{
       background: COLORS.surface, border: `0.5px solid ${COLORS.border}`,
-      borderRadius: 10, padding: "20px 22px", animation: "fadeIn .35s ease",
+      borderRadius: 16, padding: "24px 24px", animation: "fadeIn .35s ease",
       minWidth: 0,
       ...style,
     }}>{children}</div>
@@ -181,7 +185,7 @@ function Spinner() {
 
 function EmptyState({ message }) {
   return (
-    <div style={{ textAlign: "center", padding: "32px 0", color: COLORS.textMuted, fontSize: 13 }}>
+    <div style={{ textAlign: "center", padding: "32px 0", color: COLORS.textMuted, fontSize: 14 }}>
       {message}
     </div>
   );
@@ -400,9 +404,9 @@ export default function App() {
   }
   const isMobile = viewportWidth <= 640;
   const isTablet = viewportWidth <= 980;
-  const pagePaddingX = isMobile ? 14 : isTablet ? 20 : 32;
-  const contentPaddingY = isMobile ? 18 : 28;
-  const sectionGap = isMobile ? 18 : 28;
+  const pagePaddingX = isMobile ? 16 : isTablet ? 24 : 40;
+  const contentPaddingY = isMobile ? 20 : 30;
+  const sectionGap = isMobile ? 20 : 30;
   const statsGridColumns = isMobile
     ? "repeat(2, minmax(0, 1fr))"
     : isTablet
@@ -641,46 +645,70 @@ export default function App() {
         <style>{css}</style>
         <div style={{
           minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-          padding: 24, background: COLORS.bg,
+          padding: isMobile ? 16 : 24,
+          background: `radial-gradient(1200px 560px at 15% -10%, #123057 0%, transparent 65%), ${COLORS.bg}`,
         }}>
-          <div style={{ width: "100%", maxWidth: 420, animation: "fadeIn .5s ease" }}>
-            <div style={{ marginBottom: 40 }}>
+          <div style={{
+            width: "100%",
+            maxWidth: 560,
+            animation: "fadeIn .5s ease",
+            background: "rgba(15, 23, 42, 0.78)",
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: isMobile ? 16 : 20,
+            padding: isMobile ? "24px 18px" : "34px 32px",
+            boxShadow: "0 18px 80px rgba(0, 0, 0, 0.35)",
+          }}>
+            <div style={{ marginBottom: 30 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                 <div style={{
-                  width: 32, height: 32, borderRadius: 8,
+                  width: 34, height: 34, borderRadius: 10,
                   background: COLORS.accentDim, border: `0.5px solid ${COLORS.accentBorder}`,
                   display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
                 }}>◈</div>
-                <span style={{ fontSize: 13, ...mono, color: COLORS.accent, letterSpacing: "0.1em" }}>FUTURU QA</span>
+                <span style={{ fontSize: 12, ...mono, color: COLORS.accent, letterSpacing: "0.12em" }}>FUTURU QA</span>
               </div>
-              <h1 style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", marginBottom: 8 }}>
+              <h1 style={{
+                fontSize: isMobile ? 40 : 46,
+                fontWeight: 800,
+                lineHeight: 1.08,
+                letterSpacing: "-0.03em",
+                marginBottom: 10,
+                color: COLORS.text,
+                fontFamily: "'Sora', sans-serif",
+              }}>
                 Quality Dashboard
               </h1>
-              <p style={{ fontSize: 13, color: COLORS.textMuted, lineHeight: 1.6 }}>
+              <p style={{ fontSize: isMobile ? 16 : 17, color: COLORS.textMuted, lineHeight: 1.6, maxWidth: 500 }}>
                 Conecte seus tokens para visualizar dados reais dos 4 repositórios e do Linear.
               </p>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {[
                 { label: "GitHub Personal Access Token", placeholder: "ghp_...", val: ghToken, set: setGhToken, hint: "Scope: repo (read)" },
                 { label: "Linear API Key", placeholder: "lin_api_...", val: linToken, set: setLinToken, hint: "Settings → API → Personal Keys" },
               ].map(({ label, placeholder, val, set, hint }) => (
-                <div key={label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <label style={{ fontSize: 11, color: COLORS.textMuted, ...mono, letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</label>
+                <div key={label} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <label style={{ fontSize: 12, color: COLORS.textMuted, ...mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</label>
                   <input
                     type="password" value={val} onChange={e => set(e.target.value)}
                     placeholder={placeholder}
                     style={{
-                      background: COLORS.surface, border: `0.5px solid ${COLORS.border}`,
-                      borderRadius: 6, padding: "10px 14px", color: COLORS.text,
-                      fontSize: 13, outline: "none", width: "100%",
-                      transition: "border-color .2s",
+                      background: "rgba(17, 27, 46, 0.72)", border: `1px solid ${COLORS.border}`,
+                      borderRadius: 10, padding: "14px 16px", color: COLORS.text,
+                      fontSize: 15, outline: "none", width: "100%",
+                      transition: "border-color .2s, box-shadow .2s",
                     }}
-                    onFocus={e => e.target.style.borderColor = COLORS.accentBorder}
-                    onBlur={e => e.target.style.borderColor = COLORS.border}
+                    onFocus={e => {
+                      e.target.style.borderColor = COLORS.accentBorder;
+                      e.target.style.boxShadow = `0 0 0 3px ${COLORS.accentDim}`;
+                    }}
+                    onBlur={e => {
+                      e.target.style.borderColor = COLORS.border;
+                      e.target.style.boxShadow = "none";
+                    }}
                   />
-                  <span style={{ fontSize: 11, color: COLORS.textDim }}>{hint}</span>
+                  <span style={{ fontSize: 12, color: COLORS.textDim }}>{hint}</span>
                 </div>
               ))}
 
@@ -696,11 +724,12 @@ export default function App() {
                 style={{
                   background: loading ? COLORS.accentDim : COLORS.accent,
                   color: loading ? COLORS.accent : COLORS.bg,
-                  border: "none", borderRadius: 6, padding: "11px 0",
-                  fontSize: 13, fontWeight: 700, cursor: loading ? "wait" : "pointer",
-                  fontFamily: "'Syne', sans-serif", letterSpacing: "0.02em",
+                  border: "none", borderRadius: 10, padding: "15px 0",
+                  fontSize: isMobile ? 17 : 16, fontWeight: 800, cursor: loading ? "wait" : "pointer",
+                  fontFamily: "'Sora', sans-serif", letterSpacing: "0.01em",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   transition: "all .2s", opacity: !ghToken || !linToken ? 0.5 : 1,
+                  boxShadow: "0 12px 36px rgba(29, 214, 165, 0.25)",
                 }}
               >
                 {loading ? <><Spinner /> Conectando...</> : "Conectar →"}
@@ -744,22 +773,26 @@ export default function App() {
   return (
     <>
       <style>{css}</style>
-      <div style={{ minHeight: "100vh", background: COLORS.bg, padding: "0 0 48px" }}>
+      <div style={{
+        minHeight: "100vh",
+        background: `radial-gradient(1200px 560px at 15% -10%, #123057 0%, transparent 65%), ${COLORS.bg}`,
+        padding: "0 0 52px",
+      }}>
 
         {/* Header */}
         <div style={{
-          borderBottom: `0.5px solid ${COLORS.border}`,
+          borderBottom: `1px solid ${COLORS.border}`,
           padding: `${isMobile ? 12 : 16}px ${pagePaddingX}px`,
           display: "flex",
           alignItems: "center",
           flexWrap: isMobile ? "wrap" : "nowrap",
           rowGap: 8,
           justifyContent: "space-between", position: "sticky", top: 0,
-          background: COLORS.bg + "ee", backdropFilter: "blur(8px)", zIndex: 10,
+          background: COLORS.bg + "e8", backdropFilter: "blur(10px)", zIndex: 10,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 18 }}>◈</span>
-            <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: "-0.01em" }}>Futuru QA</span>
+            <span style={{ fontSize: 20 }}>◈</span>
+            <span style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-0.01em", fontFamily: "'Sora', sans-serif" }}>Futuru QA</span>
             <Tag>Dashboard</Tag>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -793,7 +826,7 @@ export default function App() {
             gap: 10,
             flexWrap: "wrap",
           }}>
-            <span style={{ fontSize: 11, color: COLORS.textMuted, ...mono, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            <span style={{ fontSize: 12, color: COLORS.textMuted, ...mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>
               Escopo de Issues
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -802,10 +835,10 @@ export default function App() {
                 style={{
                   background: issuesScope === "quality" ? COLORS.accentDim : "transparent",
                   border: `0.5px solid ${issuesScope === "quality" ? COLORS.accentBorder : COLORS.border}`,
-                  borderRadius: 6,
-                  padding: "4px 10px",
+                  borderRadius: 8,
+                  padding: "6px 12px",
                   color: issuesScope === "quality" ? COLORS.accent : COLORS.textMuted,
-                  fontSize: 11,
+                  fontSize: 12,
                   cursor: "pointer",
                   ...mono,
                 }}
@@ -817,10 +850,10 @@ export default function App() {
                 style={{
                   background: issuesScope === "global" ? COLORS.accentDim : "transparent",
                   border: `0.5px solid ${issuesScope === "global" ? COLORS.accentBorder : COLORS.border}`,
-                  borderRadius: 6,
-                  padding: "4px 10px",
+                  borderRadius: 8,
+                  padding: "6px 12px",
                   color: issuesScope === "global" ? COLORS.accent : COLORS.textMuted,
-                  fontSize: 11,
+                  fontSize: 12,
                   cursor: "pointer",
                   ...mono,
                 }}
@@ -831,7 +864,7 @@ export default function App() {
           </div>
 
           {/* Stats Row */}
-          <div style={{ display: "grid", gridTemplateColumns: statsGridColumns, gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: statsGridColumns, gap: 14 }}>
             <Stat label="Repos" value={REPOS.length} sub="monitorados" />
             <Stat label={`Issues (${issuesScope === "global" ? "FTU" : "QDB"})`} value={scopedIssues.length} color={COLORS.info} />
             <Stat label={`Em progresso (${issuesScope === "global" ? "FTU" : "QDB"})`} value={scopedInProgress.length} color={COLORS.warn} />
