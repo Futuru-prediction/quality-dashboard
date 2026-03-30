@@ -5,20 +5,20 @@ import {
 } from "../lib/k6Metrics.js";
 
 const COLORS = {
-  bg: "#0a0c0f",
-  surface: "#111418",
-  border: "#1e2329",
-  borderHover: "#2d3440",
-  accent: "#00e5a0",
-  accentDim: "#00e5a020",
-  accentBorder: "#00e5a040",
-  warn: "#f5a623",
-  danger: "#e05252",
-  info: "#4a9eff",
-  text: "#e8eaed",
-  textMuted: "#8a93a3",
-  textDim: "#647083",
-  success: "#22c55e",
+  bg: "#070b14",
+  surface: "#111b2e",
+  border: "#24324a",
+  borderHover: "#314764",
+  accent: "#1dd6a5",
+  accentDim: "#1dd6a522",
+  accentBorder: "#1dd6a566",
+  warn: "#f4b455",
+  danger: "#ff6b6b",
+  info: "#56a7ff",
+  text: "#edf3ff",
+  textMuted: "#a4b2c8",
+  textDim: "#7f8ea5",
+  success: "#33d17a",
 };
 
 const toneToColor = {
@@ -44,11 +44,11 @@ function formatRunDate(iso) {
 function Tag({ color = COLORS.accent, children }) {
   return (
     <span style={{
-      fontSize: 10,
+      fontSize: 11,
       fontWeight: 700,
       letterSpacing: "0.08em",
-      padding: "2px 7px",
-      borderRadius: 3,
+      padding: "3px 8px",
+      borderRadius: 4,
       background: `${color}20`,
       color,
       border: `0.5px solid ${color}40`,
